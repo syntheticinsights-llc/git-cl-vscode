@@ -9,6 +9,12 @@
         "isDefault": true
       },
       "problemMatcher": ["$tsc"]
+    },
+    {
+      "label": "Package & Install Locally",
+      "type": "npm",
+      "script": "install-local",
+      "problemMatcher": []
     }
   ]
 }
