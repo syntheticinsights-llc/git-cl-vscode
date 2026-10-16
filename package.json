@@ -2,7 +2,7 @@
   "name": "git-cl-vscode",
   "displayName": "git-cl — Changelist Manager",
   "description": "Manage git changelists directly in VS Code. Organizes working changes into logical groups for focused commits.",
-  "version": "0.1.2",
+  "version": "0.1.5",
   "packageManager": "pnpm@12.9.1",
   "publisher": "waylit",
   "license": "MIT",
@@ -11,7 +11,7 @@
     "url": "https://github.com/WayLit/git-cl-vscode.git"
   },
   "engines": {
-    "vscode": "^1.110.0"
+    "vscode": "^1.107.0"
   },
   "categories": [
     "Other"
@@ -343,7 +343,7 @@
     "build": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=es2020 --sourcemap",
     "watch": "npm run build -- --watch",
     "package": "npm run build -- --minify && vsce package $(semver -i prerelease $(node -p \"require('./package.json').version\"))",
-    "install-local": "npm run build -- --minify && vsce package patch --no-git-tag-version --no-dependencies --out git-cl-vscode.vsix && code --install-extension git-cl-vscode.vsix --force",
+    "install-local": "bash scripts/install-local.sh",
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -351,7 +351,7 @@
   },
   "devDependencies": {
     "@types/node": "^25.5.2",
-    "@types/vscode": "^1.110.0",
+    "@types/vscode": "~1.107.0",
     "@vitest/coverage-v8": "^5.0.0",
     "@vscode/vsce": "^4.0.0",
     "esbuild": "^0.28.0",
