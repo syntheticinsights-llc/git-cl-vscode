@@ -2,7 +2,7 @@
   "name": "git-cl-vscode",
   "displayName": "git-cl — Changelist Manager",
   "description": "Manage git changelists directly in VS Code. Organizes working changes into logical groups for focused commits.",
-  "version": "0.0.2-0",
+  "version": "0.1.1",
   "packageManager": "pnpm@12.9.1",
   "publisher": "waylit",
   "license": "MIT",
@@ -120,6 +120,30 @@
         "title": "Branch from Changelist",
         "category": "git-cl",
         "icon": "$(git-branch)"
+      },
+      {
+        "command": "git-cl.viewAsTree",
+        "title": "View as Tree",
+        "category": "git-cl",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "git-cl.viewAsList",
+        "title": "View as List",
+        "category": "git-cl",
+        "icon": "$(list-flat)"
+      },
+      {
+        "command": "git-cl.pruneChangelist",
+        "title": "Prune Unchanged Files",
+        "category": "git-cl",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "git-cl.pruneAllChangelists",
+        "title": "Prune Unchanged Files in All Changelists",
+        "category": "git-cl",
+        "icon": "$(clear-all)"
       }
     ],
     "views": {
@@ -156,6 +180,11 @@
           "group": "inline@3"
         },
         {
+          "command": "git-cl.pruneChangelist",
+          "when": "view == git-cl.changelists && viewItem == changelist",
+          "group": "inline@8"
+        },
+        {
           "command": "git-cl.deleteChangelist",
           "when": "view == git-cl.changelists && viewItem == changelist",
           "group": "inline@9"
@@ -179,6 +208,11 @@
           "command": "git-cl.deleteChangelist",
           "when": "view == git-cl.changelists && viewItem == changelist",
           "group": "1_modification@4"
+        },
+        {
+          "command": "git-cl.pruneChangelist",
+          "when": "view == git-cl.changelists && viewItem == changelist",
+          "group": "1_modification@5"
         },
         {
           "command": "git-cl.diffChangelist",
@@ -222,12 +256,12 @@
         },
         {
           "command": "git-cl.removeFromChangelist",
-          "when": "view == git-cl.changelists && viewItem == changelistFile",
+          "when": "view == git-cl.changelists && viewItem =~ /^changelist(File|Folder)$/",
           "group": "inline@2"
         },
         {
           "command": "git-cl.removeFromChangelist",
-          "when": "view == git-cl.changelists && viewItem == changelistFile",
+          "when": "view == git-cl.changelists && viewItem =~ /^changelist(File|Folder)$/",
           "group": "1_modification"
         },
         {
@@ -237,16 +271,31 @@
         },
         {
           "command": "git-cl.addToChangelist",
-          "when": "view == git-cl.changelists && viewItem == unassignedFile",
+          "when": "view == git-cl.changelists && viewItem =~ /^unassigned(File|Folder)$/",
           "group": "inline@1"
         },
         {
           "command": "git-cl.addToChangelist",
-          "when": "view == git-cl.changelists && viewItem == unassignedFile",
+          "when": "view == git-cl.changelists && viewItem =~ /^unassigned(File|Folder)$/",
           "group": "1_modification"
         }
       ],
       "view/title": [
+        {
+          "command": "git-cl.viewAsTree",
+          "when": "view == git-cl.changelists && git-cl:viewMode == list",
+          "group": "navigation"
+        },
+        {
+          "command": "git-cl.viewAsList",
+          "when": "view == git-cl.changelists && git-cl:viewMode == tree",
+          "group": "navigation"
+        },
+        {
+          "command": "git-cl.pruneAllChangelists",
+          "when": "view == git-cl.changelists",
+          "group": "navigation"
+        },
         {
           "command": "git-cl.deleteAllChangelists",
           "when": "view == git-cl.changelists",
@@ -270,6 +319,24 @@
           "group": "1_modification"
         }
       ]
+    },
+    "configuration": {
+      "title": "git-cl",
+      "properties": {
+        "git-cl.viewMode": {
+          "type": "string",
+          "enum": [
+            "tree",
+            "list"
+          ],
+          "enumDescriptions": [
+            "Show files grouped by folder.",
+            "Show files as a flat list."
+          ],
+          "default": "tree",
+          "description": "Controls whether changelist files are shown as a tree or a list. Folders are compacted according to `#scm.compactFolders#`."
+        }
+      }
     }
   },
   "scripts": {

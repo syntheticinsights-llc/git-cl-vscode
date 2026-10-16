@@ -5,6 +5,7 @@ import { execFile } from 'child_process';
 import { ChangelistStore } from './changelistStore';
 import { StashStore, StashMetadata } from './stashStore';
 import { getGitStatus, GitStatusMap } from './gitUtils';
+import { buildFileTree, collectFiles, dirname, FileTreeFolder, ViewMode } from './fileTree';
 
 const HEAD_SCHEME = 'git-cl-head';
 
@@ -40,13 +41,57 @@ function formatStashLabel(name: string, meta: StashMetadata): string {
 	return `${name} (stashed from ${meta.source_branch}, ${date})`;
 }
 
+export type FolderOwner =
+	| { type: 'changelist'; name: string }
+	| { type: 'unassigned' }
+	| { type: 'stash'; name: string };
+
 export type TreeNode =
 	| { type: 'changelist'; name: string }
 	| { type: 'changelistFile'; filePath: string; changelistName: string }
 	| { type: 'unassignedSection' }
 	| { type: 'unassignedFile'; filePath: string }
 	| { type: 'stashedChangelist'; name: string; metadata: StashMetadata }
-	| { type: 'stashedFile'; filePath: string; stashName: string };
+	| { type: 'stashedFile'; filePath: string; stashName: string }
+	| { type: 'folder'; owner: FolderOwner; folder: FileTreeFolder };
+
+const VIEW_MODE_CONTEXT_KEY = 'git-cl:viewMode';
+
+const pathCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
+function folderOwnerId(owner: FolderOwner): string {
+	switch (owner.type) {
+		case 'changelist': return `cl:${owner.name}`;
+		case 'unassigned': return 'unassigned';
+		case 'stash': return `stash:${owner.name}`;
+	}
+}
+
+function folderContextValue(owner: FolderOwner): string {
+	switch (owner.type) {
+		case 'changelist': return 'changelistFolder';
+		case 'unassigned': return 'unassignedFolder';
+		case 'stash': return 'stashedFolder';
+	}
+}
+
+/** Expands folder nodes into the file nodes they contain; other nodes pass through. */
+export function expandFolderNodes(nodes: readonly TreeNode[]): TreeNode[] {
+	return nodes.flatMap(node => {
+		if (node.type !== 'folder') {
+			return [node];
+		}
+		return collectFiles(node.folder).map(filePath => fileNodeFor(node.owner, filePath));
+	});
+}
+
+function fileNodeFor(owner: FolderOwner, filePath: string): TreeNode {
+	switch (owner.type) {
+		case 'changelist': return { type: 'changelistFile', filePath, changelistName: owner.name };
+		case 'unassigned': return { type: 'unassignedFile', filePath };
+		case 'stash': return { type: 'stashedFile', filePath, stashName: owner.name };
+	}
+}
 
 const TREE_MIME_TYPE = 'application/vnd.code.tree.git-cl.changelists';
 
@@ -112,10 +157,52 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 			this.disposables.push(watcher);
 		}
 
+		this.updateViewModeContext();
+		this.disposables.push(
+			vscode.workspace.onDidChangeConfiguration(e => {
+				if (e.affectsConfiguration('git-cl.viewMode') || e.affectsConfiguration('scm.compactFolders')) {
+					this.updateViewModeContext();
+					this._onDidChangeTreeData.fire(undefined);
+				}
+			})
+		);
+
 		// Refresh on file saves (git status may change)
 		this.disposables.push(
 			vscode.workspace.onDidSaveTextDocument(() => this.debouncedRefresh())
 		);
+	}
+
+	private get viewMode(): ViewMode {
+		return vscode.workspace.getConfiguration('git-cl').get<ViewMode>('viewMode', 'tree');
+	}
+
+	private get compactFolders(): boolean {
+		return vscode.workspace.getConfiguration('scm').get<boolean>('compactFolders', true);
+	}
+
+	private updateViewModeContext(): void {
+		vscode.commands.executeCommand('setContext', VIEW_MODE_CONTEXT_KEY, this.viewMode);
+	}
+
+	private childNodes(owner: FolderOwner, files: readonly string[]): TreeNode[] {
+		if (this.viewMode === 'list') {
+			return [...files]
+				.sort((a, b) => pathCollator.compare(a, b))
+				.map(filePath => fileNodeFor(owner, filePath));
+		}
+		return this.folderChildNodes(owner, buildFileTree(files, this.compactFolders));
+	}
+
+	private folderChildNodes(owner: FolderOwner, folder: FileTreeFolder): TreeNode[] {
+		return [
+			...folder.folders.map(child => ({ type: 'folder' as const, owner, folder: child })),
+			...folder.files.map(filePath => fileNodeFor(owner, filePath)),
+		];
+	}
+
+	private listModeDescription(filePath: string): string | undefined {
+		return this.viewMode === 'list' ? dirname(filePath) : undefined;
 	}
 
 	private debouncedRefresh(): void {
@@ -210,6 +297,7 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 				const item = new vscode.TreeItem(uri);
 				item.id = `cl:${element.changelistName}:${element.filePath}`;
 				item.contextValue = 'changelistFile';
+				item.description = this.listModeDescription(element.filePath);
 				item.command = this.createFileCommand(element.filePath, uri);
 				item.resourceUri = uri;
 				this.applyFileDecorations(item, element.filePath, uri);
@@ -232,6 +320,7 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 				const item = new vscode.TreeItem(uri);
 				item.id = `unassigned:${element.filePath}`;
 				item.contextValue = 'unassignedFile';
+				item.description = this.listModeDescription(element.filePath);
 				item.command = this.createFileCommand(element.filePath, uri);
 				item.resourceUri = uri;
 				this.applyFileDecorations(item, element.filePath, uri);
@@ -254,8 +343,19 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 				const item = new vscode.TreeItem(uri);
 				item.id = `stash:${element.stashName}:${element.filePath}`;
 				item.contextValue = 'stashedFile';
-				item.description = '(stashed)';
+				item.description = [this.listModeDescription(element.filePath), '(stashed)'].filter(Boolean).join(' ');
 				item.resourceUri = uri;
+				return item;
+			}
+
+			case 'folder': {
+				const uri = vscode.Uri.file(path.join(this.gitRoot, element.folder.path));
+				const item = new vscode.TreeItem(uri, vscode.TreeItemCollapsibleState.Expanded);
+				item.label = element.folder.label;
+				item.id = `${folderOwnerId(element.owner)}:folder:${element.folder.path}`;
+				item.contextValue = folderContextValue(element.owner);
+				item.iconPath = vscode.ThemeIcon.Folder;
+				item.tooltip = element.folder.path;
 				return item;
 			}
 		}
@@ -285,29 +385,17 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 		}
 
 		switch (element.type) {
-			case 'changelist': {
-				const files = this.cachedChangelists[element.name] ?? [];
-				return files.map(filePath => ({
-					type: 'changelistFile' as const,
-					filePath,
-					changelistName: element.name,
-				}));
-			}
+			case 'changelist':
+				return this.childNodes(element, this.cachedChangelists[element.name] ?? []);
 
-			case 'unassignedSection': {
-				return this.cachedUnassigned.map(filePath => ({
-					type: 'unassignedFile' as const,
-					filePath,
-				}));
-			}
+			case 'unassignedSection':
+				return this.childNodes({ type: 'unassigned' }, this.cachedUnassigned);
 
-			case 'stashedChangelist': {
-				return element.metadata.files.map(filePath => ({
-					type: 'stashedFile' as const,
-					filePath,
-					stashName: element.name,
-				}));
-			}
+			case 'stashedChangelist':
+				return this.childNodes({ type: 'stash', name: element.name }, element.metadata.files);
+
+			case 'folder':
+				return this.folderChildNodes(element.owner, element.folder);
 
 			default:
 				return [];
@@ -316,7 +404,7 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 
 	handleDrag(source: readonly TreeNode[], dataTransfer: vscode.DataTransfer, _token: vscode.CancellationToken): void {
 		// Only allow dragging file nodes (changelist files and unassigned files)
-		const draggable = source.filter(
+		const draggable = expandFolderNodes(source).filter(
 			n => n.type === 'changelistFile' || n.type === 'unassignedFile'
 		);
 		if (draggable.length > 0) {
@@ -342,12 +430,16 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 				targetChangelist = target.name;
 			} else if (target.type === 'changelistFile') {
 				targetChangelist = target.changelistName;
+			} else if (target.type === 'folder' && target.owner.type === 'changelist') {
+				targetChangelist = target.owner.name;
 			}
 		}
 
 		// Dropping onto unassigned section or stashed items: remove from changelist
 		if (!targetChangelist) {
-			if (target?.type === 'unassignedSection' || target?.type === 'unassignedFile') {
+			const isUnassignedTarget = target?.type === 'unassignedSection' || target?.type === 'unassignedFile' ||
+				(target?.type === 'folder' && target.owner.type === 'unassigned');
+			if (isUnassignedTarget) {
 				const filePaths = draggedNodes
 					.filter((n): n is Extract<TreeNode, { type: 'changelistFile' }> => n.type === 'changelistFile')
 					.map(n => n.filePath);

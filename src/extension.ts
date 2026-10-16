@@ -1,9 +1,11 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { getGitRoot, getGitCommonDir, getGitStatus, gitAdd, gitReset, gitCommit, gitCheckout, gitStashPush, gitStashDrop, gitStashPop, gitStashList, getCurrentBranch, gitCheckoutBranch, gitBranchExists, gitCheckoutExistingBranch } from './gitUtils';
-import { ChangelistTreeDataProvider, TreeNode } from './changelistTreeProvider';
+import { getGitRoot, getGitCommonDir, getGitStatus, gitCommit, gitCheckout, gitStashPush, gitStashDrop, gitStashPop, gitStashList, getCurrentBranch, gitCheckoutBranch, gitBranchExists, gitCheckoutExistingBranch } from './gitUtils';
+import { ChangelistTreeDataProvider, expandFolderNodes, TreeNode } from './changelistTreeProvider';
 import { validateChangelistName } from './changelistStore';
 import { FileCategories, StashMetadata } from './stashStore';
+import { ViewMode } from './fileTree';
+import { stageFiles, unstageFiles } from './builtinGit';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
 	const outputChannel = vscode.window.createOutputChannel('git-cl');
@@ -42,6 +44,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 		canSelectMany: true,
 	});
 	context.subscriptions.push(scmProvider, treeView);
+
+	const setViewMode = (mode: ViewMode) =>
+		vscode.workspace.getConfiguration('git-cl').update('viewMode', mode, vscode.ConfigurationTarget.Global);
+	context.subscriptions.push(
+		vscode.commands.registerCommand('git-cl.viewAsTree', () => setViewMode('tree')),
+		vscode.commands.registerCommand('git-cl.viewAsList', () => setViewMode('list')),
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('git-cl.pruneChangelist', async (...args: unknown[]) => {
+			const name = resolveChangelistName(args) ?? await pickChangelistForAction(scmProvider, 'prune');
+			if (name) {
+				await pruneChangelists(scmProvider, gitRoot, [name]);
+			}
+		}),
+		vscode.commands.registerCommand('git-cl.pruneAllChangelists', async () => {
+			await pruneChangelists(scmProvider, gitRoot);
+		}),
+	);
 
 	const statusCmd = vscode.commands.registerCommand('git-cl.showStatus', async () => {
 		await showFormattedStatus(outputChannel, scmProvider, gitRoot);
@@ -246,7 +267,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 			}
 
 			try {
-				await gitAdd(trackedFiles, gitRoot);
+				await stageFiles(trackedFiles, gitRoot);
 			} catch (e: unknown) {
 				const msg = e instanceof Error ? e.message : String(e);
 				vscode.window.showErrorMessage(`git-cl: Failed to stage files: ${msg}`);
@@ -301,7 +322,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 			}
 
 			try {
-				await gitReset(stagedFiles, gitRoot);
+				await unstageFiles(stagedFiles, gitRoot);
 			} catch (e: unknown) {
 				const msg = e instanceof Error ? e.message : String(e);
 				vscode.window.showErrorMessage(`git-cl: Failed to unstage files: ${msg}`);
@@ -838,6 +859,56 @@ function resolveFilePathFromArg(
 }
 
 /**
+ * Remove entries that no longer have working-tree or index changes (already
+ * committed, or reverted to HEAD), keeping each changelist limited to pending work.
+ */
+async function pruneChangelists(
+	scmProvider: ChangelistTreeDataProvider,
+	gitRoot: string,
+	names?: string[]
+): Promise<void> {
+	let gitStatusMap: Map<string, string>;
+	try {
+		gitStatusMap = await getGitStatus(gitRoot);
+	} catch {
+		vscode.window.showErrorMessage('git-cl: Failed to read git status.');
+		return;
+	}
+
+	const store = scmProvider.getChangelistStore();
+	store.load();
+	let prunedCount = 0;
+	for (const name of names ?? store.getNames()) {
+		const staleFiles = store.getFiles(name).filter(file => !gitStatusMap.has(file));
+		store.removeFiles(name, staleFiles);
+		prunedCount += staleFiles.length;
+	}
+
+	if (prunedCount === 0) {
+		vscode.window.showInformationMessage('git-cl: No unchanged files to prune.');
+		return;
+	}
+
+	store.save();
+	await scmProvider.refresh();
+	vscode.window.showInformationMessage(`git-cl: Pruned ${prunedCount} unchanged file(s).`);
+}
+
+/**
+ * Resolve the file paths a command argument refers to; folder nodes expand to
+ * every file they contain.
+ */
+function resolveFilePathsFromArg(gitRoot: string, arg: unknown): string[] {
+	if (arg && typeof arg === 'object' && (arg as TreeNode).type === 'folder') {
+		return expandFolderNodes([arg as TreeNode])
+			.map(node => resolveFilePathFromArg(gitRoot, node))
+			.filter((p): p is string => p !== undefined);
+	}
+	const filePath = resolveFilePathFromArg(gitRoot, arg);
+	return filePath ? [filePath] : [];
+}
+
+/**
  * Resolve file paths from command arguments (context menu) or prompt the user
  * to select files from git status (command palette).
  * Handles both TreeNode args (from our tree view) and SourceControlResourceState
@@ -850,9 +921,7 @@ async function resolveFilePaths(
 	// Context menu with multi-select: second arg is the array of selected items
 	if (args.length >= 2 && Array.isArray(args[1])) {
 		const items = args[1] as unknown[];
-		const paths = items
-			.map(item => resolveFilePathFromArg(gitRoot, item))
-			.filter((p): p is string => p !== undefined);
+		const paths = [...new Set(items.flatMap(item => resolveFilePathsFromArg(gitRoot, item)))];
 		if (paths.length > 0) {
 			return paths;
 		}
@@ -860,9 +929,9 @@ async function resolveFilePaths(
 
 	// Context menu single-select: first arg is the clicked item
 	if (args.length >= 1 && args[0]) {
-		const filePath = resolveFilePathFromArg(gitRoot, args[0]);
-		if (filePath) {
-			return [filePath];
+		const filePaths = resolveFilePathsFromArg(gitRoot, args[0]);
+		if (filePaths.length > 0) {
+			return filePaths;
 		}
 	}
 
@@ -912,9 +981,7 @@ async function resolveFilePathsFromChangelists(
 	// Context menu with multi-select: second arg is the array of selected items
 	if (args.length >= 2 && Array.isArray(args[1])) {
 		const items = args[1] as unknown[];
-		const paths = items
-			.map(item => resolveFilePathFromArg(gitRoot, item))
-			.filter((p): p is string => p !== undefined);
+		const paths = [...new Set(items.flatMap(item => resolveFilePathsFromArg(gitRoot, item)))];
 		if (paths.length > 0) {
 			return paths;
 		}
@@ -922,9 +989,9 @@ async function resolveFilePathsFromChangelists(
 
 	// Context menu single-select: first arg is the clicked item
 	if (args.length >= 1 && args[0]) {
-		const filePath = resolveFilePathFromArg(gitRoot, args[0]);
-		if (filePath) {
-			return [filePath];
+		const filePaths = resolveFilePathsFromArg(gitRoot, args[0]);
+		if (filePaths.length > 0) {
+			return filePaths;
 		}
 	}
 
