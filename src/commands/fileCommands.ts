@@ -20,9 +20,7 @@ export function registerFileCommands(scmProvider: ChangelistTreeDataProvider, gi
 				}
 
 				try {
-					await scmProvider.getChangelistStore().update(store =>
-						store.addFiles(changelistName, filePaths, scmProvider.getStashStore())
-					);
+					await scmProvider.getChangelistStore().addFilesLocked(changelistName, filePaths, scmProvider.getStashStore());
 				} catch (e: unknown) {
 					const msg = e instanceof Error ? e.message : String(e);
 					vscode.window.showErrorMessage(`git-cl: ${msg}`);

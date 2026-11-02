@@ -204,7 +204,7 @@ async function unstashChangelistLocked(workspace: StashWorkspace, name: string):
 		throw new Error(`Failed to unstash changelist "${name}": ${errorMessage(e)}`);
 	}
 
-	// Remove from stash store first (so addFiles won't reject stashed file conflicts)
+	// Remove from stash store first (so addFiles does not reject the changelist as hidden)
 	try {
 		stashStore.removeStash(name);
 		stashStore.save();

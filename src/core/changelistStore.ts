@@ -1,7 +1,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { writeFileAtomic } from './atomicFile';
+import { assertFilesNotHidden, assertNotHidden, HiddenChangelistSource, HiddenFileSource } from './hiddenChangelists';
 import { withLock } from './lock';
+import { StashStore } from './stashStore';
 
 /** JSON shape of cl.json: mapping of changelist name → file paths */
 export type ChangelistData = Record<string, string[]>;
@@ -17,6 +19,8 @@ const GIT_RESERVED_WORDS = new Set([
 const VALID_NAME_RE = /^[a-zA-Z0-9._-]+$/;
 
 const MAX_NAME_LENGTH = 100;
+
+const UNSAFE_PATH_CHARS = /[;|&`$\r\n]/;
 
 /**
  * Validate a changelist name.
@@ -78,6 +82,23 @@ export function sanitizeFilePath(filePath: string, gitRoot: string): string {
 
 	// Return forward-slash normalized relative path (git convention)
 	return normalized.split(path.sep).join('/');
+}
+
+/**
+ * Resolve a path given relative to cwd (as typed on a command line) to a
+ * repository-relative posix path. Throws for paths outside the repository
+ * and for shell metacharacters.
+ */
+export function resolveRepoPath(filePath: string, cwd: string, gitRoot: string): string {
+	const root = fs.realpathSync.native(gitRoot);
+	const relative = path.relative(root, path.resolve(fs.realpathSync.native(cwd), filePath));
+	if (relative.startsWith('..') || path.isAbsolute(relative)) {
+		throw new Error(`Path is outside the repository: ${filePath}`);
+	}
+	if (UNSAFE_PATH_CHARS.test(relative)) {
+		throw new Error(`Unsafe characters in path: ${filePath}`);
+	}
+	return sanitizeFilePath(relative, root);
 }
 
 /**
@@ -157,11 +178,10 @@ export class ChangelistStore {
 	/**
 	 * Add files to a changelist. Creates the changelist if it doesn't exist.
 	 * Files are automatically removed from any other changelist (single-ownership).
-	 * Validates name and sanitizes paths.
-	 *
-	 * @param stashStore - optional StashStore to check for stash conflicts
+	 * Validates name and sanitizes paths. Rejects hidden (stashed) target
+	 * changelists and files that belong to one, as known to stashStore.
 	 */
-	addFiles(name: string, files: string[], stashStore?: { getStashedFiles(): Set<string> }): void {
+	addFiles(name: string, files: string[], stashStore?: HiddenChangelistSource & HiddenFileSource): void {
 		const nameError = validateChangelistName(name);
 		if (nameError) {
 			throw new Error(nameError);
@@ -169,15 +189,9 @@ export class ChangelistStore {
 
 		const sanitized = files.map(f => sanitizeFilePath(f, this.gitRoot));
 
-		// Check stash conflicts
 		if (stashStore) {
-			const stashedFiles = stashStore.getStashedFiles();
-			const conflicts = sanitized.filter(f => stashedFiles.has(f));
-			if (conflicts.length > 0) {
-				throw new Error(
-					`Cannot add files that are in stashed changelists: ${conflicts.join(', ')}`
-				);
-			}
+			assertNotHidden([name], stashStore);
+			assertFilesNotHidden(sanitized, stashStore);
 		}
 
 		// Remove files from any existing changelist (single-ownership)
@@ -197,6 +211,14 @@ export class ChangelistStore {
 				existing.add(f);
 			}
 		}
+	}
+
+	/** Add files under the lock, checking them against stash data loaded under the same lock. */
+	addFilesLocked(name: string, files: string[], stashStore: StashStore): Promise<void> {
+		return this.update(store => {
+			stashStore.load();
+			store.addFiles(name, files, stashStore);
+		});
 	}
 
 	/** Remove files from a specific changelist. */

@@ -526,7 +526,7 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 		}
 
 		try {
-			await this.changelistStore.update(store => store.addFiles(targetChangelist, filePaths, this.stashStore));
+			await this.changelistStore.addFilesLocked(targetChangelist, filePaths, this.stashStore);
 		} catch (e: unknown) {
 			const msg = e instanceof Error ? e.message : String(e);
 			vscode.window.showErrorMessage(`git-cl: ${msg}`);

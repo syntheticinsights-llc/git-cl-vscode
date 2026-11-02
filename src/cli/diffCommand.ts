@@ -2,6 +2,8 @@ import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { ChangelistStore } from '../core/changelistStore';
+import { assertNotHidden } from '../core/hiddenChangelists';
+import { StashStore } from '../core/stashStore';
 import { CliCommand, OptionValues, print, Repository } from './command';
 import { relativeToCwd, resolvePath } from './fileStatusFormat';
 
@@ -20,11 +22,14 @@ options:
   --staged    Show staged changes (index vs HEAD)
   --both      Show both unstaged and staged diffs`,
 	flags: ['staged', 'both'],
-	requiredPositional: 'CHANGELIST',
+	requiredPositionals: ['CHANGELIST'],
 	run: showDiff,
 };
 
 function showDiff({ gitRoot, gitCommonDir }: Repository, flags: OptionValues, names: string[]): number {
+	const stashStore = new StashStore(gitRoot, gitCommonDir);
+	stashStore.load();
+	assertNotHidden(names, stashStore);
 	const store = new ChangelistStore(gitRoot, gitCommonDir);
 	store.load();
 	const changelists = store.getAll();

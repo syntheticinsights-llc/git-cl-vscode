@@ -12,8 +12,8 @@ export interface CliCommand {
 	usage: string;
 	help: string;
 	flags: readonly string[];
-	requiredPositional?: string;
-	run(repository: Repository, flags: OptionValues, positionals: string[]): number;
+	requiredPositionals?: readonly string[];
+	run(repository: Repository, flags: OptionValues, positionals: string[]): number | Promise<number>;
 }
 
 export function print(text = ''): void {

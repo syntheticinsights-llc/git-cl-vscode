@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { ChangelistStore, validateChangelistName, sanitizeFilePath } from './changelistStore';
+import { ChangelistStore, validateChangelistName, sanitizeFilePath, resolveRepoPath } from './changelistStore';
+import { StashMetadata, StashStore } from './stashStore';
 
 const failingWrite = vi.hoisted(() => ({ enabled: false }));
 
@@ -154,6 +155,51 @@ describe('sanitizeFilePath', () => {
 
 	it('handles non-canonical gitRoot (double slash)', () => {
 		expect(sanitizeFilePath('src/file.ts', '/home/user//project')).toBe('src/file.ts');
+	});
+});
+
+// ── resolveRepoPath ─────────────────────────────────────────────────────────
+
+describe('resolveRepoPath', () => {
+	let root: string;
+	let subDir: string;
+
+	beforeEach(() => {
+		root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-path-')));
+		subDir = path.join(root, 'pkg', 'lib');
+		fs.mkdirSync(subDir, { recursive: true });
+	});
+
+	afterEach(() => {
+		fs.rmSync(root, { recursive: true, force: true });
+	});
+
+	it('converts cwd-relative paths to repository-relative posix paths', () => {
+		expect(resolveRepoPath('a.ts', subDir, root)).toBe('pkg/lib/a.ts');
+		expect(resolveRepoPath('../b.ts', subDir, root)).toBe('pkg/b.ts');
+		expect(resolveRepoPath('./x/../c.ts', root, root)).toBe('c.ts');
+		expect(resolveRepoPath(path.join(subDir, 'missing.ts'), root, root)).toBe('pkg/lib/missing.ts');
+	});
+
+	it('resolves a symlinked cwd to the real repository', () => {
+		const link = `${root}-link`;
+		fs.symlinkSync(subDir, link);
+		try {
+			expect(resolveRepoPath('a.ts', link, root)).toBe('pkg/lib/a.ts');
+		} finally {
+			fs.rmSync(link);
+		}
+	});
+
+	it('rejects paths outside the repository', () => {
+		expect(() => resolveRepoPath('../../../outside.ts', subDir, root)).toThrow('outside the repository');
+		expect(() => resolveRepoPath('/etc/passwd', subDir, root)).toThrow('outside the repository');
+	});
+
+	it('rejects shell metacharacters and line breaks', () => {
+		for (const name of ['a;b', 'a|b', 'a&b', 'a`b', 'a$b', 'a\nb', 'a\rb']) {
+			expect(() => resolveRepoPath(name, root, root)).toThrow('Unsafe characters');
+		}
 	});
 });
 
@@ -326,19 +372,57 @@ describe('ChangelistStore', () => {
 
 		it('rejects files in stashed changelists', () => {
 			const stashStore = {
-				getStashedFiles: () => new Set(['src/stashed.ts']),
+				getNames: () => ['stashed'],
+				getAll: () => ({ stashed: { files: ['src/stashed.ts'] } as StashMetadata }),
 			};
 			expect(() =>
 				store.addFiles('feat', ['src/stashed.ts'], stashStore)
-			).toThrow('stashed changelists');
+			).toThrow('belongs to changelist "stashed"');
 		});
 
 		it('allows adding when stash store has no conflicts', () => {
 			const stashStore = {
-				getStashedFiles: () => new Set(['other-file.ts']),
+				getNames: () => ['stashed'],
+				getAll: () => ({ stashed: { files: ['other-file.ts'] } as StashMetadata }),
 			};
 			store.addFiles('feat', ['src/a.ts'], stashStore);
 			expect(store.getFiles('feat')).toEqual(['src/a.ts']);
+		});
+	});
+
+	describe('addFilesLocked', () => {
+		let staleStashStore: StashStore;
+
+		beforeEach(() => {
+			staleStashStore = new StashStore(tmpDir);
+			staleStashStore.load();
+			const writer = new StashStore(tmpDir);
+			writer.setStash('hidden', {
+				stash_ref: 'stash@{0}',
+				stash_message: 'git-cl-stash:hidden:2026-01-01T00:00:00Z',
+				files: ['src/hidden.ts'],
+				timestamp: '2026-01-01T00:00:00Z',
+				source_branch: 'main',
+				file_categories: { unstaged_changes: ['src/hidden.ts'], staged_additions: [], untracked: [], deleted: [] },
+			});
+			writer.save();
+		});
+
+		it('rejects a hidden target changelist known only on disk', async () => {
+			await expect(store.addFilesLocked('hidden', ['src/a.ts'], staleStashStore)).rejects.toThrow('is hidden by the user');
+			expect(fs.existsSync(store.getFilePath())).toBe(false);
+		});
+
+		it('rejects files of a hidden changelist known only on disk', async () => {
+			await expect(store.addFilesLocked('feat', ['src/hidden.ts'], staleStashStore)).rejects.toThrow('belongs to changelist "hidden"');
+			expect(fs.existsSync(store.getFilePath())).toBe(false);
+		});
+
+		it('adds files that belong to no hidden changelist', async () => {
+			await store.addFilesLocked('feat', ['src/a.ts'], staleStashStore);
+			const reloaded = new ChangelistStore(tmpDir);
+			reloaded.load();
+			expect(reloaded.getFiles('feat')).toEqual(['src/a.ts']);
 		});
 	});
 

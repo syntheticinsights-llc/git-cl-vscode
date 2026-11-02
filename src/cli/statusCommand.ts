@@ -1,8 +1,9 @@
 import { spawnSync } from 'child_process';
 import * as path from 'path';
 import { ChangelistData, ChangelistStore } from '../core/changelistStore';
+import { assertNotHidden } from '../core/hiddenChangelists';
 import { StashData, StashStore } from '../core/stashStore';
-import { CliCommand, CliExit, describeFailedCommand, OptionValues, print, Repository } from './command';
+import { CliCommand, CliExit, describeFailedCommand, OptionValues, print, printError, Repository } from './command';
 import { CONFLICT_CODES, formatFileStatus, relativeToRoot, resolvePath, shouldUseColor } from './fileStatusFormat';
 
 const COMMON_STATUS_CODES: ReadonlySet<string> = new Set([
@@ -46,7 +47,9 @@ function showStatus(repository: Repository, flags: OptionValues, names: string[]
 	const { gitRoot } = repository;
 	const selectedNames = names.length > 0 ? new Set(names) : undefined;
 	const changelists = loadChangelists(repository);
-	const stashes = loadStashes(repository);
+	const stashStore = loadStashStore(repository);
+	assertNotHidden(names, stashStore);
+	const stashes = stashStore.getAll();
 	const statusMap = readStatusMap(gitRoot, flags.all === true, flags['no-untracked'] !== true);
 	const useColor = shouldUseColor(flags['no-color'] === true);
 	const hasStashes = Object.keys(stashes).length > 0;
@@ -87,10 +90,10 @@ function loadChangelists({ gitRoot, gitCommonDir }: Repository): Readonly<Change
 	return store.getAll();
 }
 
-function loadStashes({ gitRoot, gitCommonDir }: Repository): Readonly<StashData> {
+function loadStashStore({ gitRoot, gitCommonDir }: Repository): StashStore {
 	const store = new StashStore(gitRoot, gitCommonDir);
 	store.load();
-	return store.getAll();
+	return store;
 }
 
 function readStatusMap(gitRoot: string, showAll: boolean, includeUntracked: boolean): Map<string, string> {
@@ -101,7 +104,7 @@ function readStatusMap(gitRoot: string, showAll: boolean, includeUntracked: bool
 		maxBuffer: 1024 * 1024 * 1024,
 	});
 	if (result.status !== 0) {
-		print(`Error getting git status: ${describeFailedCommand(command, result.status)}`);
+		printError(`Error getting git status: ${describeFailedCommand(command, result.status)}`);
 		throw new CliExit(1);
 	}
 

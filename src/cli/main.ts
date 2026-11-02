@@ -1,15 +1,26 @@
 import { spawnSync } from 'child_process';
 import { parseArgs } from 'util';
 import { getGitCommonDir } from '../core/gitUtils';
+import { HiddenChangelistError } from '../core/hiddenChangelists';
+import { addCommand } from './addCommand';
 import { CliCommand, CliExit, describeFailedCommand, OptionValues, print, printError, Repository } from './command';
+import { deleteCommand } from './deleteCommand';
 import { diffCommand } from './diffCommand';
 import { resolvePath } from './fileStatusFormat';
+import { removeCommand } from './removeCommand';
 import { statusCommand } from './statusCommand';
 
 const PROG = 'git-cl';
 const MAIN_USAGE = 'git cl <command> [<args>]';
 
 const COMMANDS: ReadonlyMap<string, CliCommand> = new Map([
+	['add', addCommand],
+	['a', addCommand],
+	['remove', removeCommand],
+	['r', removeCommand],
+	['rm', removeCommand],
+	['delete', deleteCommand],
+	['del', deleteCommand],
 	['status', statusCommand],
 	['s', statusCommand],
 	['st', statusCommand],
@@ -19,6 +30,9 @@ const COMMANDS: ReadonlyMap<string, CliCommand> = new Map([
 const MAIN_HELP = `usage: ${MAIN_USAGE}
 
 Commands:
+  add (a)         Add files to a changelist
+  remove (r, rm)  Remove files from their changelist
+  delete (del)    Delete changelists
   status (s, st)  Show file changes grouped by changelist
   diff            Show git diff for one or more changelists`;
 
@@ -79,8 +93,9 @@ function parseCommandArgs(command: CliCommand, args: string[]): ParsedArgs | und
 	if (withValue) {
 		throw new UsageError(command.usage, prog, `argument ${withValue.rawName}: ignored explicit argument '${withValue.value}'`);
 	}
-	if (command.requiredPositional && positionals.length === 0) {
-		throw new UsageError(command.usage, prog, `the following arguments are required: ${command.requiredPositional}`);
+	const missing = (command.requiredPositionals ?? []).slice(positionals.length);
+	if (missing.length > 0) {
+		throw new UsageError(command.usage, prog, `the following arguments are required: ${missing.join(', ')}`);
 	}
 	return { flags: values as OptionValues, positionals };
 }
@@ -90,15 +105,15 @@ async function openRepository(): Promise<Repository> {
 	try {
 		gitCommonDir = await getGitCommonDir(process.cwd());
 	} catch {
-		print('Error: Not inside a Git repository.');
-		print('Please run this command from within a Git repository.');
+		printError('Error: Not inside a Git repository.');
+		printError('Please run this command from within a Git repository.');
 		throw new CliExit(1);
 	}
 
 	const command = ['git', 'rev-parse', '--show-toplevel'];
 	const result = spawnSync(command[0], command.slice(1), { encoding: 'utf-8', stdio: ['inherit', 'pipe', 'inherit'] });
 	if (result.status !== 0) {
-		print(`Error: Not inside a Git repository. ${describeFailedCommand(command, result.status)}`);
+		printError(`Error: Not inside a Git repository. ${describeFailedCommand(command, result.status)}`);
 		throw new CliExit(1);
 	}
 	return { gitRoot: resolvePath(result.stdout.trim()), gitCommonDir };
@@ -115,7 +130,11 @@ function exitCodeFor(error: unknown): number {
 		printError(`usage: ${error.usage}\n${error.prog}: error: ${error.message}`);
 		return 2;
 	}
-	printError(`${PROG}: error: ${error instanceof Error ? error.message : String(error)}`);
+	if (error instanceof HiddenChangelistError) {
+		printError(error.message);
+		return 1;
+	}
+	printError(`Error: ${error instanceof Error ? error.message : String(error)}`);
 	return 1;
 }
 
