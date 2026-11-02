@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { getGitRoot, getGitCommonDir, getGitStatus, gitCommit, gitCheckout, gitStashPush, gitStashDrop, gitStashPop, gitStashList, getCurrentBranch, gitCheckoutBranch, gitBranchExists, gitCheckoutExistingBranch } from './gitUtils';
+import { getGitRoot, gitAdd, gitReset, getGitCommonDir, getGitStatus, gitCommit, gitCheckout, gitStashPush, gitStashDrop, gitStashPop, gitStashList, getCurrentBranch, gitCheckoutBranch, gitBranchExists, gitCheckoutExistingBranch } from './gitUtils';
 import { ChangelistTreeDataProvider, expandFolderNodes, nodeFilePaths, TreeNode } from './changelistTreeProvider';
 import { validateChangelistName } from './changelistStore';
 import { FileCategories, StashMetadata } from './stashStore';
@@ -185,17 +185,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 	const deleteChangelistCmd = vscode.commands.registerCommand(
 		'git-cl.deleteChangelist',
 		async (...args: unknown[]) => {
-			const changelistName = resolveChangelistName(args);
-
-			if (changelistName) {
-				// Invoked from context menu — we have the changelist name
-				await deleteChangelistWithConfirmation(scmProvider, changelistName);
-			} else {
-				// Command palette — prompt user to pick a changelist
-				const name = await pickChangelistForDeletion(scmProvider);
-				if (name) {
-					await deleteChangelistWithConfirmation(scmProvider, name);
-				}
+			const name = resolveChangelistName(args) ?? resolveStashName(args) ?? await pickChangelistForAction(scmProvider, 'disband');
+			if (name) {
+				await disbandChangelistWithConfirmation(scmProvider, gitRoot, name);
 			}
 		}
 	);
@@ -205,31 +197,39 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 		async () => {
 			const store = scmProvider.getChangelistStore();
 			store.load();
+			const stashStore = scmProvider.getStashStore();
+			stashStore.load();
 			const names = store.getNames();
+			const hiddenNames = stashStore.getNames();
 
-			if (names.length === 0) {
-				vscode.window.showInformationMessage('git-cl: No changelists to delete.');
+			if (names.length + hiddenNames.length === 0) {
+				vscode.window.showInformationMessage('git-cl: No changelists to disband.');
 				return;
 			}
 
-			const totalFiles = names.reduce(
-				(sum, name) => sum + store.getFiles(name).length, 0
-			);
+			const totalFiles = names.reduce((sum, name) => sum + store.getFiles(name).length, 0) +
+				hiddenNames.reduce((sum, name) => sum + (stashStore.getStash(name)?.files.length ?? 0), 0);
+			const hiddenNote = hiddenNames.length > 0 ? ' Hidden changes will be shown again first.' : '';
 
 			const message = totalFiles > 0
-				? `Delete all ${names.length} changelist(s)? ${totalFiles} file(s) will be moved to Unassigned.`
-				: `Delete all ${names.length} empty changelist(s)?`;
+				? `Disband all ${names.length + hiddenNames.length} changelist(s)? ${totalFiles} file(s) will be moved to Unassigned.${hiddenNote}`
+				: `Disband all ${names.length} empty changelist(s)?`;
 
 			const answer = await vscode.window.showWarningMessage(
 				message,
 				{ modal: true },
-				'Delete All'
+				'Disband All'
 			);
 
-			if (answer !== 'Delete All') {
+			if (answer !== 'Disband All') {
 				return;
 			}
 
+			for (const name of hiddenNames) {
+				await unstashSingleChangelist(scmProvider, name, gitRoot, false);
+			}
+
+			store.load();
 			try {
 				store.deleteAll();
 				store.save();
@@ -554,6 +554,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				`git-cl: Reverted ${files.length} file(s) in "${name}" to HEAD.`
 			);
 		}
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('git-cl.hideChangelist', async (...args: unknown[]) => {
+			const name = resolveChangelistName(args) ?? await pickChangelistForAction(scmProvider, 'hide');
+			if (name && await stashSingleChangelist(scmProvider, name, gitRoot)) {
+				await scmProvider.refresh();
+			}
+		}),
+		vscode.commands.registerCommand('git-cl.showChangelist', async (...args: unknown[]) => {
+			const name = resolveStashName(args) ?? await pickStashedChangelistForAction(scmProvider, 'show');
+			if (name && await unstashSingleChangelist(scmProvider, name, gitRoot, false)) {
+				await scmProvider.refresh();
+			}
+		}),
 	);
 
 	const stashChangelistCmd = vscode.commands.registerCommand(
@@ -1101,12 +1116,6 @@ function resolveChangelistName(
 /**
  * Show QuickPick to select a changelist for deletion (command palette flow).
  */
-async function pickChangelistForDeletion(
-	scmProvider: ChangelistTreeDataProvider
-): Promise<string | undefined> {
-	return pickChangelistForAction(scmProvider, 'delete');
-}
-
 /**
  * Show QuickPick to select a changelist for a given action (command palette flow).
  */
@@ -1161,30 +1170,41 @@ async function pickAndCopyFromChangelist(
 }
 
 /**
- * Delete a changelist after confirming with the user.
+ * Disband a changelist after confirming with the user: its files move to
+ * Unassigned with their changes kept. Hidden changes are shown again first.
  */
-async function deleteChangelistWithConfirmation(
+async function disbandChangelistWithConfirmation(
 	scmProvider: ChangelistTreeDataProvider,
+	gitRoot: string,
 	name: string
 ): Promise<void> {
 	const store = scmProvider.getChangelistStore();
 	store.load();
-	const files = store.getFiles(name);
+	const stashStore = scmProvider.getStashStore();
+	stashStore.load();
+	const hiddenFiles = stashStore.getStash(name)?.files;
+	const files = hiddenFiles ?? store.getFiles(name);
+	const hiddenNote = hiddenFiles ? ' Its hidden changes will be shown again first.' : '';
 
 	const message = files.length > 0
-		? `Delete changelist "${name}"? ${files.length} file(s) will be moved to Unassigned.`
-		: `Delete empty changelist "${name}"?`;
+		? `Disband changelist "${name}"? ${files.length} file(s) will be moved to Unassigned.${hiddenNote}`
+		: `Disband empty changelist "${name}"?`;
 
 	const answer = await vscode.window.showWarningMessage(
 		message,
 		{ modal: true },
-		'Delete'
+		'Disband'
 	);
 
-	if (answer !== 'Delete') {
+	if (answer !== 'Disband') {
 		return;
 	}
 
+	if (hiddenFiles && !await unstashSingleChangelist(scmProvider, name, gitRoot, false)) {
+		return;
+	}
+
+	store.load();
 	try {
 		store.deleteChangelist(name);
 		store.save();
@@ -1216,12 +1236,13 @@ async function stashSingleChangelist(
 		return false;
 	}
 
-	// Get git status to categorize files
 	let gitStatusMap: Map<string, string>;
 	try {
+		await prepareIndexForStash(files, await getGitStatus(gitRoot), gitRoot);
 		gitStatusMap = await getGitStatus(gitRoot);
-	} catch {
-		vscode.window.showErrorMessage('git-cl: Failed to read git status.');
+	} catch (e: unknown) {
+		const msg = e instanceof Error ? e.message : String(e);
+		vscode.window.showErrorMessage(`git-cl: Failed to prepare changelist "${name}" for stashing: ${msg}`);
 		return false;
 	}
 
@@ -1328,6 +1349,19 @@ async function stashSingleChangelist(
 	}
 
 	return true;
+}
+
+/**
+ * `git stash push -- <paths>` rejects two index states: a staged deletion
+ * (the path is in neither index nor working tree) and an intent-to-add entry
+ * (`git add -N`). Turn the first into an unstaged deletion and fully stage
+ * the second; both changes survive the stash round trip.
+ */
+async function prepareIndexForStash(files: readonly string[], gitStatusMap: Map<string, string>, gitRoot: string): Promise<void> {
+	const stagedDeletions = files.filter(f => gitStatusMap.get(f) === 'D ');
+	const intentToAdd = files.filter(f => gitStatusMap.get(f) === ' A');
+	await gitReset(stagedDeletions, gitRoot);
+	await gitAdd(intentToAdd, gitRoot);
 }
 
 /**

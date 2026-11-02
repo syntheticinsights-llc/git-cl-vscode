@@ -50,18 +50,19 @@ Each changelist group header has inline action buttons:
 | **+** | Stage all tracked files in the changelist |
 | **-** | Unstage all staged files in the changelist |
 | **checkmark** | Commit the changelist (prompts for message) |
-| **trash** | Delete the changelist (files return to Unassigned) |
+| **copy** | Copy the changelist name or a review prompt for it |
+| **eye** | Hide the changelist's changes from disk (stashed); click the closed eye to show them again |
+| **ungroup** | Disband the changelist (files return to Unassigned, changes are kept) |
 
 Additional operations are available via right-click on the changelist header or the Command Palette:
 
 - **Diff Changelist** — Open diff tabs for every file in the changelist.
 - **Checkout (Revert) Changelist** — Discard all changes, reverting files to HEAD.
-- **Stash Changelist** — Stash the changelist's changes and save metadata.
 - **Branch from Changelist** — Create a new branch with only this changelist's files.
 
-### Stashed changelists
+### Hidden changelists
 
-Stashed changelists appear in a read-only **Stashed** section with their source branch and timestamp. Right-click to **Unstash** and restore the changelist.
+A hidden changelist stays in the list with a closed eye; its changes are kept in a git stash until you show them again. Disbanding a hidden changelist shows its changes again first.
 
 ## Commands
 
@@ -71,8 +72,8 @@ All commands are available via the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+
 |---------|-------------|
 | `git-cl: Add to Changelist` | Add files to a changelist |
 | `git-cl: Remove from Changelist` | Remove files from their changelist |
-| `git-cl: Delete Changelist` | Delete a changelist |
-| `git-cl: Delete All Changelists` | Delete all changelists |
+| `git-cl: Disband Changelist` | Disband a changelist, keeping its changes |
+| `git-cl: Disband All Changelists` | Disband all changelists, keeping their changes |
 | `git-cl: Stage Changelist` | Stage tracked files in a changelist |
 | `git-cl: Unstage Changelist` | Unstage files in a changelist |
 | `git-cl: Commit Changelist` | Commit a changelist with a message |

@@ -48,11 +48,6 @@ class HeadContentProvider implements vscode.TextDocumentContentProvider {
 	}
 }
 
-function formatStashLabel(name: string, meta: StashMetadata): string {
-	const date = new Date(meta.timestamp).toLocaleDateString();
-	return `${name} (stashed from ${meta.source_branch}, ${date})`;
-}
-
 export type FolderOwner =
 	| { type: 'changelist'; name: string }
 	| { type: 'unassigned' }
@@ -123,7 +118,7 @@ const TREE_MIME_TYPE = 'application/vnd.code.tree.git-cl.changelists';
  * TreeDataProvider that surfaces changelists in a TreeView within the
  * Source Control sidebar.
  *
- * Tree structure: [active changelists] → Unassigned → [stashed changelists].
+ * Tree structure: [active changelists] → [hidden (stashed) changelists] → Unassigned.
  */
 export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeNode>, vscode.TreeDragAndDropController<TreeNode>, vscode.Disposable {
 	readonly dropMimeTypes = [TREE_MIME_TYPE];
@@ -393,12 +388,13 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 
 			case 'stashedChangelist': {
 				const item = new vscode.TreeItem(
-					formatStashLabel(element.name, element.metadata),
-					vscode.TreeItemCollapsibleState.Collapsed
+					element.name,
+					vscode.TreeItemCollapsibleState.Expanded
 				);
 				item.id = `stash:${element.name}`;
 				item.contextValue = 'stashedChangelist';
-				item.iconPath = new vscode.ThemeIcon('archive');
+				item.iconPath = new vscode.ThemeIcon('list-unordered');
+				item.description = `${element.metadata.files.length} file(s)`;
 				return item;
 			}
 
@@ -407,7 +403,7 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 				const item = new vscode.TreeItem(uri);
 				item.id = `stash:${element.stashName}:${element.filePath}`;
 				item.contextValue = 'stashedFile';
-				item.description = [this.listModeDescription(element.filePath), '(stashed)'].filter(Boolean).join(' ');
+				item.description = this.listModeDescription(element.filePath);
 				item.resourceUri = uri;
 				return item;
 			}
@@ -435,14 +431,14 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 				nodes.push({ type: 'changelist', name });
 			}
 
+			// Hidden (stashed) changelists
+			for (const [name, metadata] of Object.entries(this.cachedStashData)) {
+				nodes.push({ type: 'stashedChangelist', name, metadata });
+			}
+
 			// Unassigned section (only if there are unassigned files)
 			if (this.cachedUnassigned.length > 0) {
 				nodes.push({ type: 'unassignedSection' });
-			}
-
-			// Stashed changelists
-			for (const [name, metadata] of Object.entries(this.cachedStashData)) {
-				nodes.push({ type: 'stashedChangelist', name, metadata });
 			}
 
 			return nodes;

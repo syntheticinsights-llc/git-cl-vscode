@@ -2,7 +2,7 @@
   "name": "git-cl-vscode",
   "displayName": "git-cl — Changelist Manager",
   "description": "Manage git changelists directly in VS Code. Organizes working changes into logical groups for focused commits.",
-  "version": "0.1.9",
+  "version": "0.1.12",
   "packageManager": "pnpm@12.9.1",
   "publisher": "waylit",
   "license": "MIT",
@@ -48,15 +48,15 @@
       },
       {
         "command": "git-cl.deleteChangelist",
-        "title": "Delete Changelist",
+        "title": "Disband Changelist",
         "category": "git-cl",
-        "icon": "$(trash)"
+        "icon": "$(ungroup-by-ref-type)"
       },
       {
         "command": "git-cl.deleteAllChangelists",
-        "title": "Delete All Changelists",
+        "title": "Disband All Changelists",
         "category": "git-cl",
-        "icon": "$(trash)"
+        "icon": "$(ungroup-by-ref-type)"
       },
       {
         "command": "git-cl.stageChangelist",
@@ -87,6 +87,18 @@
         "title": "Checkout (Revert) Changelist",
         "category": "git-cl",
         "icon": "$(discard)"
+      },
+      {
+        "command": "git-cl.hideChangelist",
+        "title": "Hide Changes",
+        "category": "git-cl",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "git-cl.showChangelist",
+        "title": "Show Changes",
+        "category": "git-cl",
+        "icon": "$(eye-closed)"
       },
       {
         "command": "git-cl.stashChangelist",
@@ -177,6 +189,11 @@
     "menus": {
       "view/item/context": [
         {
+          "command": "git-cl.hideChangelist",
+          "when": "view == git-cl.changelists && viewItem == changelist",
+          "group": "inline@8"
+        },
+        {
           "command": "git-cl.copyFromChangelist",
           "when": "view == git-cl.changelists && viewItem == changelist",
           "group": "inline@0"
@@ -199,7 +216,7 @@
         {
           "command": "git-cl.pruneChangelist",
           "when": "view == git-cl.changelists && viewItem == changelist",
-          "group": "inline@8"
+          "group": "inline@7"
         },
         {
           "command": "git-cl.deleteChangelist",
@@ -247,29 +264,24 @@
           "group": "3_revert@1"
         },
         {
-          "command": "git-cl.stashChangelist",
-          "when": "view == git-cl.changelists && viewItem == changelist",
-          "group": "4_stash@1"
-        },
-        {
           "command": "git-cl.branchFromChangelist",
           "when": "view == git-cl.changelists && viewItem == changelist",
           "group": "5_branch@1"
         },
         {
-          "command": "git-cl.unstashChangelist",
+          "command": "git-cl.showChangelist",
           "when": "view == git-cl.changelists && viewItem == stashedChangelist",
-          "group": "inline@1"
+          "group": "inline@8"
         },
         {
-          "command": "git-cl.unstashChangelist",
+          "command": "git-cl.deleteChangelist",
+          "when": "view == git-cl.changelists && viewItem == stashedChangelist",
+          "group": "inline@9"
+        },
+        {
+          "command": "git-cl.deleteChangelist",
           "when": "view == git-cl.changelists && viewItem == stashedChangelist",
           "group": "1_modification@1"
-        },
-        {
-          "command": "git-cl.unstashChangelistForce",
-          "when": "view == git-cl.changelists && viewItem == stashedChangelist",
-          "group": "1_modification@2"
         },
         {
           "command": "git-cl.openFileDiff",
