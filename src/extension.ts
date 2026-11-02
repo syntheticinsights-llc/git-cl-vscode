@@ -1,11 +1,13 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { getGitRoot, getGitCommonDir, getGitStatus, gitCommit, gitCheckout, gitStashPush, gitStashDrop, gitStashPop, gitStashList, getCurrentBranch, gitCheckoutBranch, gitBranchExists, gitCheckoutExistingBranch } from './gitUtils';
-import { ChangelistTreeDataProvider, expandFolderNodes, TreeNode } from './changelistTreeProvider';
+import { ChangelistTreeDataProvider, expandFolderNodes, nodeFilePaths, TreeNode } from './changelistTreeProvider';
 import { validateChangelistName } from './changelistStore';
 import { FileCategories, StashMetadata } from './stashStore';
 import { ViewMode } from './fileTree';
 import { stageFiles, unstageFiles } from './builtinGit';
+import { renderReviewPrompt } from './reviewPrompt';
+import { editReviewTemplate, readReviewTemplate } from './reviewTemplate';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
 	const outputChannel = vscode.window.createOutputChannel('git-cl');
@@ -62,6 +64,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 		vscode.commands.registerCommand('git-cl.pruneAllChangelists', async () => {
 			await pruneChangelists(scmProvider, gitRoot);
 		}),
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('git-cl.copyFromChangelist', async (...args: unknown[]) => {
+			const name = resolveChangelistName(args) ?? await pickChangelistForAction(scmProvider, 'copy from');
+			if (name) {
+				await pickAndCopyFromChangelist(scmProvider, gitRoot, name);
+			}
+		}),
+		vscode.commands.registerCommand('git-cl.editReviewTemplate', () => editReviewTemplate(gitRoot)),
 	);
 
 	const statusCmd = vscode.commands.registerCommand('git-cl.showStatus', async () => {
@@ -139,6 +151,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				return;
 			}
 
+			const renamedFrom = (args[0] as { renamedFrom?: string } | undefined)?.renamedFrom;
 			const status = gitStatusMap.get(filePath);
 			const fileUri = vscode.Uri.file(path.join(gitRoot, filePath));
 			const isUntracked = status === '??';
@@ -156,12 +169,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 			} else {
 				const headUri = vscode.Uri.from({
 					scheme: 'git-cl-head',
-					path: `/${filePath}`,
+					path: `/${renamedFrom ?? filePath}`,
 				});
 				await vscode.commands.executeCommand('vscode.diff',
 					headUri,
 					fileUri,
-					`${path.basename(filePath)} (Working Tree)`
+					renamedFrom
+						? `${path.basename(renamedFrom)} → ${path.basename(filePath)} (Working Tree)`
+						: `${path.basename(filePath)} (Working Tree)`
 				);
 			}
 		}
@@ -896,13 +911,11 @@ async function pruneChangelists(
 
 /**
  * Resolve the file paths a command argument refers to; folder nodes expand to
- * every file they contain.
+ * every file they contain, and a merged rename covers both of its paths.
  */
 function resolveFilePathsFromArg(gitRoot: string, arg: unknown): string[] {
-	if (arg && typeof arg === 'object' && (arg as TreeNode).type === 'folder') {
-		return expandFolderNodes([arg as TreeNode])
-			.map(node => resolveFilePathFromArg(gitRoot, node))
-			.filter((p): p is string => p !== undefined);
+	if (arg && typeof arg === 'object' && 'type' in arg) {
+		return expandFolderNodes([arg as TreeNode]).flatMap(nodeFilePaths);
 	}
 	const filePath = resolveFilePathFromArg(gitRoot, arg);
 	return filePath ? [filePath] : [];
@@ -1120,6 +1133,31 @@ async function pickChangelistForAction(
 	});
 
 	return picked?.label;
+}
+
+/** Lets the user pick what to copy from a changelist: its name or a review prompt for it. */
+async function pickAndCopyFromChangelist(
+	scmProvider: ChangelistTreeDataProvider,
+	gitRoot: string,
+	name: string
+): Promise<void> {
+	const reviewPrompt = (): string => {
+		const store = scmProvider.getChangelistStore();
+		store.load();
+		return renderReviewPrompt(readReviewTemplate(gitRoot), { changelist: name, files: store.getFiles(name) });
+	};
+	const choices = [
+		{ label: '$(symbol-string) Copy Name', copied: 'Changelist name', text: () => name },
+		{ label: '$(comment-discussion) Copy Review Prompt', copied: 'Review prompt', text: reviewPrompt },
+	];
+
+	const picked = await vscode.window.showQuickPick(choices, { placeHolder: `Copy from changelist "${name}"` });
+	if (!picked) {
+		return;
+	}
+
+	await vscode.env.clipboard.writeText(picked.text());
+	vscode.window.showInformationMessage(`git-cl: ${picked.copied} copied to the clipboard.`);
 }
 
 /**

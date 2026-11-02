@@ -53,28 +53,60 @@ export async function getGitCommonDir(cwd: string): Promise<string> {
 	return path.resolve(cwd, result);
 }
 
+export interface GitStatusSnapshot {
+	/** Repository-relative path → 2-character status code; both sides of a rename are listed separately. */
+	status: GitStatusMap;
+	/** New path → original path for every rename git detected. */
+	renames: Map<string, string>;
+}
+
+function renameSideCode(code: string, renamedCode: 'A' | 'D'): string {
+	return code === 'R' || code === 'C' ? renamedCode : code;
+}
+
 /**
- * Runs `git status --porcelain` and returns a parsed map of
- * relative file path → 2-character status code (e.g., " M", "??", "A ").
+ * Parses `git status --porcelain -z` output. A rename entry ("R  new\0old")
+ * is split into an add of the new path and a delete of the original, so
+ * every path keeps its own status, and the pairing is reported in `renames`.
  */
-export async function getGitStatus(gitRoot: string): Promise<GitStatusMap> {
-	const output = await execGit(['status', '--porcelain'], gitRoot);
-	const result: GitStatusMap = new Map();
-	for (const line of output.split('\n')) {
-		if (line.length < 4) {
+export function parsePorcelainStatus(output: string): GitStatusSnapshot {
+	const status: GitStatusMap = new Map();
+	const renames = new Map<string, string>();
+	const entries = output.split('\0');
+	for (let i = 0; i < entries.length; i++) {
+		const entry = entries[i];
+		if (entry.length < 4) {
 			continue;
 		}
-		const status = line.substring(0, 2);
-		let filePath = line.substring(3);
-		// Handle renamed files: "R  old -> new"
-		const arrowIndex = filePath.indexOf(' -> ');
-		if (arrowIndex !== -1) {
-			filePath = filePath.substring(arrowIndex + 4);
+		const [x, y] = entry;
+		const filePath = entry.substring(3);
+		const isRename = x === 'R' || y === 'R';
+		const hasOrigin = isRename || x === 'C' || y === 'C';
+		if (!hasOrigin) {
+			status.set(filePath, entry.substring(0, 2));
+			continue;
 		}
-		// Normalize path separators to forward slashes
-		result.set(filePath.split(path.sep).join('/'), status);
+		const origin = entries[++i];
+		status.set(filePath, renameSideCode(x, 'A') + renameSideCode(y, 'A'));
+		if (isRename && origin) {
+			status.set(origin, x === 'R' ? 'D ' : ' D');
+			renames.set(filePath, origin);
+		}
 	}
-	return result;
+	return { status, renames };
+}
+
+export async function getGitStatusSnapshot(gitRoot: string): Promise<GitStatusSnapshot> {
+	return parsePorcelainStatus(await execGit(['status', '--porcelain', '-z'], gitRoot));
+}
+
+/**
+ * Returns a map of repository-relative path → 2-character status code
+ * (e.g., " M", "??", "A "). Renamed files appear as a delete of the
+ * original path plus an add of the new one.
+ */
+export async function getGitStatus(gitRoot: string): Promise<GitStatusMap> {
+	return (await getGitStatusSnapshot(gitRoot)).status;
 }
 
 /**
@@ -206,6 +238,17 @@ export async function getCurrentBranch(gitRoot: string): Promise<string | null> 
 		return output.trim() || null;
 	} catch {
 		// Detached HEAD state
+		return null;
+	}
+}
+
+/**
+ * Returns the commit HEAD points to, or null when HEAD is unborn.
+ */
+export async function getHeadCommit(gitRoot: string): Promise<string | null> {
+	try {
+		return (await execGit(['rev-parse', 'HEAD'], gitRoot)).trim();
+	} catch {
 		return null;
 	}
 }

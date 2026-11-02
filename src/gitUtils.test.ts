@@ -3,6 +3,7 @@ import * as childProcess from 'child_process';
 import {
 	getGitRoot,
 	getGitStatus,
+	parsePorcelainStatus,
 	gitAdd,
 	gitReset,
 	gitCheckout,
@@ -69,51 +70,40 @@ describe('getGitRoot', () => {
 
 // ── getGitStatus ────────────────────────────────────────────────────────────
 
+/** Builds `git status --porcelain -z` output from entries. */
+function z(...entries: string[]): string {
+	return entries.map(e => `${e}\0`).join('');
+}
+
 describe('getGitStatus', () => {
-	it('parses porcelain status output', async () => {
-		mockExecSuccess(
-			' M src/modified.ts\n' +
-			'?? newfile.ts\n' +
-			'A  src/added.ts\n' +
-			'D  deleted.ts\n' +
-			''
+	it('parses every status code and keeps paths with spaces and non-ASCII characters verbatim', async () => {
+		mockExecSuccess(z(
+			' M unstaged-mod.ts',
+			'M  staged-mod.ts',
+			'MM mixed-mod.ts',
+			'AM added-then-modified.ts',
+			' D unstaged-del.ts',
+			'D  staged-del.ts',
+			'?? untracked.ts',
+			' M d/中文 文件.txt',
+		));
+		const status = await getGitStatus('/project');
+		expect(mockedExecFile).toHaveBeenCalledWith(
+			'git',
+			['status', '--porcelain', '-z'],
+			expect.anything(),
+			expect.any(Function)
 		);
-		const status = await getGitStatus('/project');
-		expect(status.get('src/modified.ts')).toBe(' M');
-		expect(status.get('newfile.ts')).toBe('??');
-		expect(status.get('src/added.ts')).toBe('A ');
-		expect(status.get('deleted.ts')).toBe('D ');
-	});
-
-	it('parses all git status codes', async () => {
-		mockExecSuccess(
-			' M unstaged-mod.ts\n' +
-			'M  staged-mod.ts\n' +
-			'MM mixed-mod.ts\n' +
-			'A  newly-added.ts\n' +
-			'AM added-then-modified.ts\n' +
-			' D unstaged-del.ts\n' +
-			'D  staged-del.ts\n' +
-			'?? untracked.ts\n' +
-			''
-		);
-		const status = await getGitStatus('/project');
-		expect(status.get('unstaged-mod.ts')).toBe(' M');
-		expect(status.get('staged-mod.ts')).toBe('M ');
-		expect(status.get('mixed-mod.ts')).toBe('MM');
-		expect(status.get('newly-added.ts')).toBe('A ');
-		expect(status.get('added-then-modified.ts')).toBe('AM');
-		expect(status.get('unstaged-del.ts')).toBe(' D');
-		expect(status.get('staged-del.ts')).toBe('D ');
-		expect(status.get('untracked.ts')).toBe('??');
-		expect(status.size).toBe(8);
-	});
-
-	it('handles renamed files (extracts new path)', async () => {
-		mockExecSuccess('R  old.ts -> new.ts\n');
-		const status = await getGitStatus('/project');
-		expect(status.get('new.ts')).toBe('R ');
-		expect(status.has('old.ts')).toBe(false);
+		expect(Object.fromEntries(status)).toEqual({
+			'unstaged-mod.ts': ' M',
+			'staged-mod.ts': 'M ',
+			'mixed-mod.ts': 'MM',
+			'added-then-modified.ts': 'AM',
+			'unstaged-del.ts': ' D',
+			'staged-del.ts': 'D ',
+			'untracked.ts': '??',
+			'd/中文 文件.txt': ' M',
+		});
 	});
 
 	it('returns empty map for clean repo', async () => {
@@ -121,11 +111,27 @@ describe('getGitStatus', () => {
 		const status = await getGitStatus('/project');
 		expect(status.size).toBe(0);
 	});
+});
 
-	it('skips short/empty lines', async () => {
-		mockExecSuccess(' M a.ts\n\n\n M b.ts\n');
-		const status = await getGitStatus('/project');
-		expect(status.size).toBe(2);
+describe('parsePorcelainStatus', () => {
+	it('splits renames into an add and a delete, matching --no-renames, and records the pairing', () => {
+		const { status, renames } = parsePorcelainStatus(z(' R a2.txt', 'a.txt', 'RM b2.txt', 'b.txt', ' M c.txt'));
+
+		expect(Object.fromEntries(status)).toEqual({
+			'a2.txt': ' A',
+			'a.txt': ' D',
+			'b2.txt': 'AM',
+			'b.txt': 'D ',
+			'c.txt': ' M',
+		});
+		expect(Object.fromEntries(renames)).toEqual({ 'a2.txt': 'a.txt', 'b2.txt': 'b.txt' });
+	});
+
+	it('treats a copy as an add and leaves the source untouched', () => {
+		const { status, renames } = parsePorcelainStatus(z('C  copy.txt', 'source.txt'));
+
+		expect(Object.fromEntries(status)).toEqual({ 'copy.txt': 'A ' });
+		expect(renames.size).toBe(0);
 	});
 });
 

@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import { execFile } from 'child_process';
 import { ChangelistStore } from './changelistStore';
 import { StashStore, StashMetadata } from './stashStore';
-import { getGitStatus, GitStatusMap } from './gitUtils';
+import { getGitStatusSnapshot, getHeadCommit, GitStatusMap } from './gitUtils';
 import { buildFileTree, collectFiles, dirname, FileTreeFolder, ViewMode } from './fileTree';
 
 const HEAD_SCHEME = 'git-cl-head';
@@ -14,7 +14,19 @@ const HEAD_SCHEME = 'git-cl-head';
  * Used for showing diff (HEAD vs working copy) when clicking files.
  */
 class HeadContentProvider implements vscode.TextDocumentContentProvider {
+	private readonly changeEmitter = new vscode.EventEmitter<vscode.Uri>();
+	readonly onDidChange = this.changeEmitter.event;
+
 	constructor(private readonly gitRoot: string) {}
+
+	/** VS Code caches provided content, so loaded HEAD documents must be told when HEAD moves. */
+	reloadOpenDocuments(): void {
+		for (const document of vscode.workspace.textDocuments) {
+			if (document.uri.scheme === HEAD_SCHEME) {
+				this.changeEmitter.fire(document.uri);
+			}
+		}
+	}
 
 	provideTextDocumentContent(uri: vscode.Uri): Promise<string> {
 		const relativePath = uri.path.startsWith('/') ? uri.path.slice(1) : uri.path;
@@ -48,12 +60,12 @@ export type FolderOwner =
 
 export type TreeNode =
 	| { type: 'changelist'; name: string }
-	| { type: 'changelistFile'; filePath: string; changelistName: string }
+	| { type: 'changelistFile'; filePath: string; changelistName: string; renamedFrom?: string }
 	| { type: 'unassignedSection' }
-	| { type: 'unassignedFile'; filePath: string }
+	| { type: 'unassignedFile'; filePath: string; renamedFrom?: string }
 	| { type: 'stashedChangelist'; name: string; metadata: StashMetadata }
 	| { type: 'stashedFile'; filePath: string; stashName: string }
-	| { type: 'folder'; owner: FolderOwner; folder: FileTreeFolder };
+	| { type: 'folder'; owner: FolderOwner; folder: FileTreeFolder; renames: ReadonlyMap<string, string> };
 
 const VIEW_MODE_CONTEXT_KEY = 'git-cl:viewMode';
 
@@ -81,16 +93,28 @@ export function expandFolderNodes(nodes: readonly TreeNode[]): TreeNode[] {
 		if (node.type !== 'folder') {
 			return [node];
 		}
-		return collectFiles(node.folder).map(filePath => fileNodeFor(node.owner, filePath));
+		return collectFiles(node.folder).map(filePath => fileNodeFor(node.owner, filePath, node.renames.get(filePath)));
 	});
 }
 
-function fileNodeFor(owner: FolderOwner, filePath: string): TreeNode {
+/** Every repository path a file node stands for: a merged rename covers both its new and original path. */
+export function nodeFilePaths(node: TreeNode): string[] {
+	if (node.type !== 'changelistFile' && node.type !== 'unassignedFile') {
+		return [];
+	}
+	return node.renamedFrom ? [node.filePath, node.renamedFrom] : [node.filePath];
+}
+
+function fileNodeFor(owner: FolderOwner, filePath: string, renamedFrom?: string): TreeNode {
 	switch (owner.type) {
-		case 'changelist': return { type: 'changelistFile', filePath, changelistName: owner.name };
-		case 'unassigned': return { type: 'unassignedFile', filePath };
+		case 'changelist': return { type: 'changelistFile', filePath, changelistName: owner.name, renamedFrom };
+		case 'unassigned': return { type: 'unassignedFile', filePath, renamedFrom };
 		case 'stash': return { type: 'stashedFile', filePath, stashName: owner.name };
 	}
+}
+
+function renameDescription(filePath: string, renamedFrom: string): string {
+	return dirname(filePath) === dirname(renamedFrom) ? `← ${path.posix.basename(renamedFrom)}` : `← ${renamedFrom}`;
 }
 
 const TREE_MIME_TYPE = 'application/vnd.code.tree.git-cl.changelists';
@@ -118,9 +142,12 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 	private cachedChangelists: Record<string, string[]> = {};
 	private cachedStashData: Record<string, StashMetadata> = {};
 	private cachedGitStatus: GitStatusMap = new Map();
+	private cachedRenames = new Map<string, string>();
 	private cachedUnassigned: string[] = [];
 
 	private readonly gitCommonDir: string;
+	private readonly headContentProvider: HeadContentProvider;
+	private lastHeadCommit: string | null | undefined;
 
 	constructor(private readonly gitRoot: string, private readonly outputChannel?: vscode.OutputChannel, gitCommonDir?: string) {
 		this.gitCommonDir = gitCommonDir ?? path.join(gitRoot, '.git');
@@ -128,11 +155,9 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 		this.stashStore = new StashStore(gitRoot, this.gitCommonDir);
 
 		// Register HEAD content provider for diffs
+		this.headContentProvider = new HeadContentProvider(gitRoot);
 		this.disposables.push(
-			vscode.workspace.registerTextDocumentContentProvider(
-				HEAD_SCHEME,
-				new HeadContentProvider(gitRoot)
-			)
+			vscode.workspace.registerTextDocumentContentProvider(HEAD_SCHEME, this.headContentProvider)
 		);
 
 		this.setupWatchers();
@@ -145,8 +170,8 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 	private setupWatchers(): void {
 		const gitDir = this.gitCommonDir;
 
-		// Watch cl.json, cl-stashes.json, git index, and HEAD (for branch switches)
-		const patterns = ['cl.json', 'cl-stashes.json', 'index', 'HEAD'];
+		// Watch cl.json, cl-stashes.json, git index, HEAD (branch switches) and logs/HEAD (every HEAD move)
+		const patterns = ['cl.json', 'cl-stashes.json', 'index', 'HEAD', 'logs/HEAD'];
 		for (const file of patterns) {
 			const watcher = vscode.workspace.createFileSystemWatcher(
 				new vscode.RelativePattern(vscode.Uri.file(gitDir), file)
@@ -185,20 +210,51 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 		vscode.commands.executeCommand('setContext', VIEW_MODE_CONTEXT_KEY, this.viewMode);
 	}
 
-	private childNodes(owner: FolderOwner, files: readonly string[]): TreeNode[] {
-		if (this.viewMode === 'list') {
-			return [...files]
-				.sort((a, b) => pathCollator.compare(a, b))
-				.map(filePath => fileNodeFor(owner, filePath));
+	/** Renames (new path → original) whose both sides are in the same group, shown as one item like VS Code's Source Control. */
+	private groupedRenames(owner: FolderOwner, files: readonly string[]): Map<string, string> {
+		const renames = new Map<string, string>();
+		if (owner.type === 'stash') {
+			return renames;
 		}
-		return this.folderChildNodes(owner, buildFileTree(files, this.compactFolders));
+		const fileSet = new Set(files);
+		for (const [newPath, originalPath] of this.cachedRenames) {
+			if (fileSet.has(newPath) && fileSet.has(originalPath)) {
+				renames.set(newPath, originalPath);
+			}
+		}
+		return renames;
 	}
 
-	private folderChildNodes(owner: FolderOwner, folder: FileTreeFolder): TreeNode[] {
+	private visibleFiles(files: readonly string[], renames: ReadonlyMap<string, string>): string[] {
+		const hidden = new Set(renames.values());
+		return files.filter(file => !hidden.has(file));
+	}
+
+	private visibleFileCount(owner: FolderOwner, files: readonly string[]): number {
+		return this.visibleFiles(files, this.groupedRenames(owner, files)).length;
+	}
+
+	private childNodes(owner: FolderOwner, files: readonly string[]): TreeNode[] {
+		const renames = this.groupedRenames(owner, files);
+		const visible = this.visibleFiles(files, renames);
+		if (this.viewMode === 'list') {
+			return visible
+				.sort((a, b) => pathCollator.compare(a, b))
+				.map(filePath => fileNodeFor(owner, filePath, renames.get(filePath)));
+		}
+		return this.folderChildNodes(owner, buildFileTree(visible, this.compactFolders), renames);
+	}
+
+	private folderChildNodes(owner: FolderOwner, folder: FileTreeFolder, renames: ReadonlyMap<string, string>): TreeNode[] {
 		return [
-			...folder.folders.map(child => ({ type: 'folder' as const, owner, folder: child })),
-			...folder.files.map(filePath => fileNodeFor(owner, filePath)),
+			...folder.folders.map(child => ({ type: 'folder' as const, owner, folder: child, renames })),
+			...folder.files.map(filePath => fileNodeFor(owner, filePath, renames.get(filePath))),
 		];
+	}
+
+	private fileDescription(filePath: string, renamedFrom: string | undefined): string | undefined {
+		const parts = [this.listModeDescription(filePath), renamedFrom && renameDescription(filePath, renamedFrom)];
+		return parts.filter(Boolean).join(' ') || undefined;
 	}
 
 	private listModeDescription(filePath: string): string | undefined {
@@ -222,8 +278,9 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 		this.stashStore.load();
 
 		let gitStatus: GitStatusMap;
+		let renames = new Map<string, string>();
 		try {
-			gitStatus = await getGitStatus(this.gitRoot);
+			({ status: gitStatus, renames } = await getGitStatusSnapshot(this.gitRoot));
 		} catch (err) {
 			const errMsg = err instanceof Error ? err.message : String(err);
 			this.outputChannel?.appendLine(`git-cl: Failed to read git status: ${errMsg}`);
@@ -233,6 +290,13 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 		this.cachedChangelists = this.changelistStore.getAll();
 		this.cachedStashData = this.stashStore.getAll();
 		this.cachedGitStatus = gitStatus;
+		this.cachedRenames = renames;
+
+		const headCommit = await getHeadCommit(this.gitRoot);
+		if (this.lastHeadCommit !== undefined && headCommit !== this.lastHeadCommit) {
+			this.headContentProvider.reloadOpenDocuments();
+		}
+		this.lastHeadCommit = headCommit;
 
 		// Compute unassigned files
 		const assignedFiles = new Set<string>();
@@ -288,7 +352,7 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 				item.id = `cl:${element.name}`;
 				item.contextValue = 'changelist';
 				item.iconPath = new vscode.ThemeIcon('list-unordered');
-				item.description = `${files.length} file(s)`;
+				item.description = `${this.visibleFileCount({ type: 'changelist', name: element.name }, files)} file(s)`;
 				return item;
 			}
 
@@ -297,10 +361,10 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 				const item = new vscode.TreeItem(uri);
 				item.id = `cl:${element.changelistName}:${element.filePath}`;
 				item.contextValue = 'changelistFile';
-				item.description = this.listModeDescription(element.filePath);
-				item.command = this.createFileCommand(element.filePath, uri);
+				item.description = this.fileDescription(element.filePath, element.renamedFrom);
+				item.command = this.createFileCommand(element.filePath, uri, element.renamedFrom);
 				item.resourceUri = uri;
-				this.applyFileDecorations(item, element.filePath, uri);
+				this.applyFileDecorations(item, element.filePath, uri, element.renamedFrom);
 				return item;
 			}
 
@@ -311,7 +375,7 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 				);
 				item.id = 'unassigned';
 				item.contextValue = 'unassignedSection';
-				item.description = `${this.cachedUnassigned.length} file(s)`;
+				item.description = `${this.visibleFileCount({ type: 'unassigned' }, this.cachedUnassigned)} file(s)`;
 				return item;
 			}
 
@@ -320,10 +384,10 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 				const item = new vscode.TreeItem(uri);
 				item.id = `unassigned:${element.filePath}`;
 				item.contextValue = 'unassignedFile';
-				item.description = this.listModeDescription(element.filePath);
-				item.command = this.createFileCommand(element.filePath, uri);
+				item.description = this.fileDescription(element.filePath, element.renamedFrom);
+				item.command = this.createFileCommand(element.filePath, uri, element.renamedFrom);
 				item.resourceUri = uri;
-				this.applyFileDecorations(item, element.filePath, uri);
+				this.applyFileDecorations(item, element.filePath, uri, element.renamedFrom);
 				return item;
 			}
 
@@ -395,7 +459,7 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 				return this.childNodes({ type: 'stash', name: element.name }, element.metadata.files);
 
 			case 'folder':
-				return this.folderChildNodes(element.owner, element.folder);
+				return this.folderChildNodes(element.owner, element.folder, element.renames);
 
 			default:
 				return [];
@@ -441,8 +505,8 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 				(target?.type === 'folder' && target.owner.type === 'unassigned');
 			if (isUnassignedTarget) {
 				const filePaths = draggedNodes
-					.filter((n): n is Extract<TreeNode, { type: 'changelistFile' }> => n.type === 'changelistFile')
-					.map(n => n.filePath);
+					.filter(n => n.type === 'changelistFile')
+					.flatMap(nodeFilePaths);
 				if (filePaths.length > 0) {
 					for (const filePath of filePaths) {
 						const clName = this.changelistStore.findChangelist(filePath);
@@ -458,11 +522,7 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 		}
 
 		// Collect file paths from dragged nodes
-		const filePaths = draggedNodes
-			.filter((n): n is Extract<TreeNode, { type: 'changelistFile' | 'unassignedFile' }> =>
-				n.type === 'changelistFile' || n.type === 'unassignedFile'
-			)
-			.map(n => n.filePath);
+		const filePaths = draggedNodes.flatMap(nodeFilePaths);
 
 		if (filePaths.length === 0) {
 			return;
@@ -480,7 +540,7 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 		await this.refresh();
 	}
 
-	private createFileCommand(filePath: string, uri: vscode.Uri): vscode.Command {
+	private createFileCommand(filePath: string, uri: vscode.Uri, renamedFrom?: string): vscode.Command {
 		const status = this.cachedGitStatus.get(filePath) ?? '  ';
 		const isDeleted = status[1] === 'D' || (status[0] === 'D' && status[1] === ' ');
 		const isUntracked = status === '??';
@@ -494,14 +554,16 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 			title: 'Open Diff',
 			command: 'vscode.diff',
 			arguments: [
-				vscode.Uri.from({ scheme: HEAD_SCHEME, path: `/${filePath}` }),
+				vscode.Uri.from({ scheme: HEAD_SCHEME, path: `/${renamedFrom ?? filePath}` }),
 				uri,
-				`${path.basename(filePath)} (Working Tree)`,
+				renamedFrom
+					? `${path.basename(renamedFrom)} → ${path.basename(filePath)} (Working Tree)`
+					: `${path.basename(filePath)} (Working Tree)`,
 			],
 		};
 	}
 
-	private applyFileDecorations(item: vscode.TreeItem, filePath: string, uri: vscode.Uri): void {
+	private applyFileDecorations(item: vscode.TreeItem, filePath: string, uri: vscode.Uri, renamedFrom?: string): void {
 		const status = this.cachedGitStatus.get(filePath) ?? '  ';
 		const isDeleted = status[1] === 'D' || (status[0] === 'D' && status[1] === ' ');
 		const isMissing = !isDeleted && !fs.existsSync(uri.fsPath);
@@ -510,7 +572,9 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 			item.tooltip = `${filePath} [missing from disk]`;
 			item.iconPath = new vscode.ThemeIcon('warning', new vscode.ThemeColor('problemsWarningIcon.foreground'));
 		} else {
-			item.tooltip = `${filePath} [${status.trim() || 'clean'}]`;
+			item.tooltip = renamedFrom
+				? `${renamedFrom} → ${filePath} [renamed]`
+				: `${filePath} [${status.trim() || 'clean'}]`;
 		}
 	}
 
