@@ -1,8 +1,22 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { ChangelistStore, validateChangelistName, sanitizeFilePath } from './changelistStore';
+
+const failingWrite = vi.hoisted(() => ({ enabled: false }));
+
+vi.mock('fs', async importOriginal => {
+	const actual = await importOriginal<typeof import('fs')>();
+	const writeFileSync: typeof actual.writeFileSync = (file, data, options) => {
+		if (!failingWrite.enabled) {
+			return actual.writeFileSync(file, data, options);
+		}
+		actual.writeFileSync(file, String(data).slice(0, 5));
+		throw new Error('ENOSPC');
+	};
+	return { ...actual, default: { ...actual, writeFileSync }, writeFileSync };
+});
 
 // ── validateChangelistName ──────────────────────────────────────────────────
 
@@ -227,6 +241,51 @@ describe('ChangelistStore', () => {
 			store.addFiles('test', ['a.ts']);
 			store.save();
 			expect(fs.existsSync(path.join(gitDir, 'cl.json'))).toBe(true);
+		});
+
+		it('leaves the existing file intact when a write fails midway', () => {
+			store.addFiles('original', ['a.ts']);
+			store.save();
+			const before = fs.readFileSync(store.getFilePath(), 'utf-8');
+
+			failingWrite.enabled = true;
+			try {
+				store.addFiles('replacement', ['b.ts']);
+				expect(() => store.save()).toThrow('ENOSPC');
+			} finally {
+				failingWrite.enabled = false;
+			}
+
+			expect(fs.readFileSync(store.getFilePath(), 'utf-8')).toBe(before);
+			expect(fs.readdirSync(gitDir)).toEqual(['cl.json']);
+		});
+	});
+
+	describe('update', () => {
+		it('saves changes made on top of the latest file content', async () => {
+			const other = new ChangelistStore(tmpDir);
+			other.addFiles('theirs', ['a.ts']);
+			other.save();
+
+			await store.update(s => s.addFiles('mine', ['b.ts']));
+
+			const reloaded = new ChangelistStore(tmpDir);
+			reloaded.load();
+			expect(reloaded.getAll()).toEqual({ theirs: ['a.ts'], mine: ['b.ts'] });
+		});
+
+		it('writes nothing and releases the lock when the mutator throws', async () => {
+			store.addFiles('original', ['a.ts']);
+			store.save();
+			const before = fs.readFileSync(store.getFilePath(), 'utf-8');
+
+			await expect(store.update(s => {
+				s.deleteAll();
+				throw new Error('boom');
+			})).rejects.toThrow('boom');
+
+			expect(fs.readFileSync(store.getFilePath(), 'utf-8')).toBe(before);
+			expect(fs.readdirSync(gitDir)).toEqual(['cl.json']);
 		});
 	});
 

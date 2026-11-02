@@ -1,5 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { writeFileAtomic } from './atomicFile';
+import { withLock } from './lock';
 
 /** JSON shape of cl.json: mapping of changelist name → file paths */
 export type ChangelistData = Record<string, string[]>;
@@ -85,11 +87,13 @@ export function sanitizeFilePath(filePath: string, gitRoot: string): string {
  * Data format is compatible with the Python git-cl tool.
  */
 export class ChangelistStore {
+	private readonly gitCommonDir: string;
 	private readonly filePath: string;
 	private data: ChangelistData = {};
 
 	constructor(private readonly gitRoot: string, gitCommonDir?: string) {
-		this.filePath = path.join(gitCommonDir ?? path.join(gitRoot, '.git'), 'cl.json');
+		this.gitCommonDir = gitCommonDir ?? path.join(gitRoot, '.git');
+		this.filePath = path.join(this.gitCommonDir, 'cl.json');
 	}
 
 	/** Load changelists from disk. Returns empty data if file doesn't exist. */
@@ -122,11 +126,17 @@ export class ChangelistStore {
 				toWrite[name] = files;
 			}
 		}
-		const dir = path.dirname(this.filePath);
-		if (!fs.existsSync(dir)) {
-			fs.mkdirSync(dir, { recursive: true });
-		}
-		fs.writeFileSync(this.filePath, JSON.stringify(toWrite, null, 2) + '\n', 'utf-8');
+		writeFileAtomic(this.filePath, JSON.stringify(toWrite, null, 2) + '\n');
+	}
+
+	/** Load, apply mutator, and save while holding the git-cl lock. Nothing is saved if mutator throws. */
+	update<T>(mutator: (store: ChangelistStore) => T): Promise<T> {
+		return withLock(this.gitCommonDir, () => {
+			this.load();
+			const result = mutator(this);
+			this.save();
+			return result;
+		});
 	}
 
 	/** Get all changelists (including empty ones in memory). */
@@ -235,5 +245,10 @@ export class ChangelistStore {
 	/** Get the path to cl.json */
 	getFilePath(): string {
 		return this.filePath;
+	}
+
+	/** Get the directory holding cl.json and the git-cl lock */
+	getGitCommonDir(): string {
+		return this.gitCommonDir;
 	}
 }

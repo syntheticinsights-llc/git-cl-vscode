@@ -1,5 +1,6 @@
 import { getCurrentBranch, getGitStatus, gitAdd, gitReset, gitStashDrop, gitStashList, gitStashPop, gitStashPush } from './gitUtils';
 import { ChangelistStore } from './changelistStore';
+import { withLock } from './lock';
 import { FileCategories, StashMetadata, StashStore } from './stashStore';
 
 export interface StashWorkspace {
@@ -31,7 +32,11 @@ export interface UnstashRisks {
  * Throws EmptyChangelistError when there is nothing in the changelist,
  * and Error for any other failure.
  */
-export async function stashChangelist(workspace: StashWorkspace, name: string): Promise<void> {
+export function stashChangelist(workspace: StashWorkspace, name: string): Promise<void> {
+	return withLock(workspace.changelistStore.getGitCommonDir(), () => stashChangelistLocked(workspace, name));
+}
+
+async function stashChangelistLocked(workspace: StashWorkspace, name: string): Promise<void> {
 	const { changelistStore: store, stashStore, gitRoot } = workspace;
 	store.load();
 	const files = store.getFiles(name);
@@ -178,7 +183,11 @@ export async function findUnstashRisks(workspace: StashWorkspace, name: string):
  * Unstash a single changelist: find stash ref, pop stash, and restore
  * changelist to cl.json. Performs no branch or conflict checks.
  */
-export async function unstashChangelist(workspace: StashWorkspace, name: string): Promise<void> {
+export function unstashChangelist(workspace: StashWorkspace, name: string): Promise<void> {
+	return withLock(workspace.changelistStore.getGitCommonDir(), () => unstashChangelistLocked(workspace, name));
+}
+
+async function unstashChangelistLocked(workspace: StashWorkspace, name: string): Promise<void> {
 	const { changelistStore: store, stashStore, gitRoot } = workspace;
 	const metadata = loadStashMetadata(stashStore, name);
 

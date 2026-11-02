@@ -504,13 +504,14 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 					.filter(n => n.type === 'changelistFile')
 					.flatMap(nodeFilePaths);
 				if (filePaths.length > 0) {
-					for (const filePath of filePaths) {
-						const clName = this.changelistStore.findChangelist(filePath);
-						if (clName) {
-							this.changelistStore.removeFiles(clName, [filePath]);
+					await this.changelistStore.update(store => {
+						for (const filePath of filePaths) {
+							const clName = store.findChangelist(filePath);
+							if (clName) {
+								store.removeFiles(clName, [filePath]);
+							}
 						}
-					}
-					this.changelistStore.save();
+					});
 					await this.refresh();
 				}
 			}
@@ -525,8 +526,7 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 		}
 
 		try {
-			this.changelistStore.addFiles(targetChangelist, filePaths, this.stashStore);
-			this.changelistStore.save();
+			await this.changelistStore.update(store => store.addFiles(targetChangelist, filePaths, this.stashStore));
 		} catch (e: unknown) {
 			const msg = e instanceof Error ? e.message : String(e);
 			vscode.window.showErrorMessage(`git-cl: ${msg}`);

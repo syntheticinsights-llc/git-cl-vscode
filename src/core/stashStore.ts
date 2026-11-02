@@ -1,5 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { writeFileAtomic } from './atomicFile';
+import { withLock } from './lock';
 
 /** Categories of files in a stash, matching Python git-cl format */
 export interface FileCategories {
@@ -29,11 +31,13 @@ export type StashData = Record<string, StashMetadata>;
  * Data format is compatible with the Python git-cl tool.
  */
 export class StashStore {
+	private readonly gitCommonDir: string;
 	private readonly filePath: string;
 	private data: StashData = {};
 
 	constructor(private readonly gitRoot: string, gitCommonDir?: string) {
-		this.filePath = path.join(gitCommonDir ?? path.join(gitRoot, '.git'), 'cl-stashes.json');
+		this.gitCommonDir = gitCommonDir ?? path.join(gitRoot, '.git');
+		this.filePath = path.join(this.gitCommonDir, 'cl-stashes.json');
 	}
 
 	/** Load stash data from disk. Returns empty data if file doesn't exist. */
@@ -60,11 +64,17 @@ export class StashStore {
 
 	/** Save stash data to disk. Empty data results in an empty object. */
 	save(): void {
-		const dir = path.dirname(this.filePath);
-		if (!fs.existsSync(dir)) {
-			fs.mkdirSync(dir, { recursive: true });
-		}
-		fs.writeFileSync(this.filePath, JSON.stringify(this.data, null, 2) + '\n', 'utf-8');
+		writeFileAtomic(this.filePath, JSON.stringify(this.data, null, 2) + '\n');
+	}
+
+	/** Load, apply mutator, and save while holding the git-cl lock. Nothing is saved if mutator throws. */
+	update<T>(mutator: (store: StashStore) => T): Promise<T> {
+		return withLock(this.gitCommonDir, () => {
+			this.load();
+			const result = mutator(this);
+			this.save();
+			return result;
+		});
 	}
 
 	/** Get all stashed changelists. */

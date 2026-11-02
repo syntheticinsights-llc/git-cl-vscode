@@ -174,8 +174,7 @@ export function registerGitCommands(scmProvider: ChangelistTreeDataProvider, git
 
 				// Delete the changelist after commit (default behavior)
 				try {
-					store.deleteChangelist(name);
-					store.save();
+					await store.update(s => s.deleteChangelist(name));
 				} catch (e: unknown) {
 					const saveMsg = e instanceof Error ? e.message : String(e);
 					vscode.window.showWarningMessage(`git-cl: Commit succeeded but failed to update changelist data: ${saveMsg}`);
@@ -301,8 +300,7 @@ export function registerGitCommands(scmProvider: ChangelistTreeDataProvider, git
 				// Delete the changelist if requested
 				if (answer === 'Revert & Delete Changelist') {
 					try {
-						store.deleteChangelist(name);
-						store.save();
+						await store.update(s => s.deleteChangelist(name));
 					} catch (e: unknown) {
 						const saveMsg = e instanceof Error ? e.message : String(e);
 						vscode.window.showWarningMessage(`git-cl: Revert succeeded but failed to update changelist data: ${saveMsg}`);

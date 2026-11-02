@@ -20,9 +20,9 @@ export function registerFileCommands(scmProvider: ChangelistTreeDataProvider, gi
 				}
 
 				try {
-					const store = scmProvider.getChangelistStore();
-					store.addFiles(changelistName, filePaths, scmProvider.getStashStore());
-					store.save();
+					await scmProvider.getChangelistStore().update(store =>
+						store.addFiles(changelistName, filePaths, scmProvider.getStashStore())
+					);
 				} catch (e: unknown) {
 					const msg = e instanceof Error ? e.message : String(e);
 					vscode.window.showErrorMessage(`git-cl: ${msg}`);
@@ -41,14 +41,14 @@ export function registerFileCommands(scmProvider: ChangelistTreeDataProvider, gi
 				}
 
 				try {
-					const store = scmProvider.getChangelistStore();
-					for (const filePath of filePaths) {
-						const clName = store.findChangelist(filePath);
-						if (clName) {
-							store.removeFiles(clName, [filePath]);
+					await scmProvider.getChangelistStore().update(store => {
+						for (const filePath of filePaths) {
+							const clName = store.findChangelist(filePath);
+							if (clName) {
+								store.removeFiles(clName, [filePath]);
+							}
 						}
-					}
-					store.save();
+					});
 				} catch (e: unknown) {
 					const msg = e instanceof Error ? e.message : String(e);
 					vscode.window.showErrorMessage(`git-cl: ${msg}`);

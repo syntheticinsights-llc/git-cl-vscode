@@ -54,10 +54,8 @@ export function registerChangelistCommands(scmProvider: ChangelistTreeDataProvid
 					await unstashSingleChangelist(scmProvider, name, gitRoot, false);
 				}
 
-				store.load();
 				try {
-					store.deleteAll();
-					store.save();
+					await store.update(s => s.deleteAll());
 				} catch (e: unknown) {
 					const msg = e instanceof Error ? e.message : String(e);
 					vscode.window.showErrorMessage(`git-cl: ${msg}`);
@@ -103,21 +101,21 @@ async function pruneChangelists(
 		return;
 	}
 
-	const store = scmProvider.getChangelistStore();
-	store.load();
-	let prunedCount = 0;
-	for (const name of names ?? store.getNames()) {
-		const staleFiles = store.getFiles(name).filter(file => !gitStatusMap.has(file));
-		store.removeFiles(name, staleFiles);
-		prunedCount += staleFiles.length;
-	}
+	const prunedCount = await scmProvider.getChangelistStore().update(store => {
+		let count = 0;
+		for (const name of names ?? store.getNames()) {
+			const staleFiles = store.getFiles(name).filter(file => !gitStatusMap.has(file));
+			store.removeFiles(name, staleFiles);
+			count += staleFiles.length;
+		}
+		return count;
+	});
 
 	if (prunedCount === 0) {
 		vscode.window.showInformationMessage('git-cl: No unchanged files to prune.');
 		return;
 	}
 
-	store.save();
 	await scmProvider.refresh();
 	vscode.window.showInformationMessage(`git-cl: Pruned ${prunedCount} unchanged file(s).`);
 }
@@ -182,10 +180,8 @@ async function disbandChangelistWithConfirmation(
 		return;
 	}
 
-	store.load();
 	try {
-		store.deleteChangelist(name);
-		store.save();
+		await store.update(s => s.deleteChangelist(name));
 	} catch (e: unknown) {
 		const msg = e instanceof Error ? e.message : String(e);
 		vscode.window.showErrorMessage(`git-cl: ${msg}`);
