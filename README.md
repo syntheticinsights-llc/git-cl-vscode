@@ -7,7 +7,7 @@ Manage [git-cl](https://github.com/BHFock/git-cl) changelists directly in VS Cod
 - **Changelists in Source Control** — Each changelist appears as a group in the Source Control sidebar with file status decorations (modified, added, deleted, untracked).
 - **Add files from anywhere** — Right-click files in the built-in Git Changes section or the Unassigned group to assign them to a changelist.
 - **Stage, commit, diff, revert per changelist** — Inline buttons on each changelist header let you stage, commit, diff, or revert all files in the group with one click.
-- **Stash & unstash changelists** — Temporarily shelve a changelist (or all of them) and restore later. Stash metadata tracks source branch and timestamps.
+- **Hide & show changelists** — Temporarily take a changelist's changes off disk (a git stash, or all of them at once) and bring them back later.
 - **Branch from changelist** — Create a new branch containing only the files in a specific changelist.
 - **Auto-refresh** — The tree updates automatically when `cl.json` changes on disk (e.g. from the CLI tool) or when git status changes.
 - **Fully interoperable** — Reads and writes the same `.git/cl.json` and `.git/cl-stashes.json` files as the Python CLI, so you can use both tools side by side.
@@ -80,10 +80,7 @@ All commands are available via the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+
 | `git-cl: Diff Changelist` | Open diffs for all files in a changelist |
 | `git-cl: Checkout (Revert) Changelist` | Revert files to HEAD |
 | `git-cl: Show Changelist Status` | Show formatted status in the output panel |
-| `git-cl: Stash Changelist` | Stash a single changelist |
 | `git-cl: Stash All Changelists` | Stash all active changelists |
-| `git-cl: Unstash Changelist` | Restore a stashed changelist |
-| `git-cl: Unstash Changelist (Force)` | Unstash without branch/conflict checks |
 | `git-cl: Unstash All Changelists` | Restore all stashed changelists |
 | `git-cl: Branch from Changelist` | Create a new branch from a changelist |
 

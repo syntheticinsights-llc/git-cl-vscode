@@ -571,25 +571,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 		}),
 	);
 
-	const stashChangelistCmd = vscode.commands.registerCommand(
-		'git-cl.stashChangelist',
-		async (...args: unknown[]) => {
-			const changelistName = resolveChangelistName(args);
-			const name = changelistName ?? await pickChangelistForAction(scmProvider, 'stash');
-			if (!name) {
-				return;
-			}
-
-			const success = await stashSingleChangelist(scmProvider, name, gitRoot);
-			if (success) {
-				await scmProvider.refresh();
-				vscode.window.showInformationMessage(
-					`git-cl: Stashed changelist "${name}".`
-				);
-			}
-		}
-	);
-
 	const stashAllChangelistsCmd = vscode.commands.registerCommand(
 		'git-cl.stashAllChangelists',
 		async () => {
@@ -614,44 +595,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 			if (stashedCount > 0) {
 				vscode.window.showInformationMessage(
 					`git-cl: Stashed ${stashedCount} changelist(s).`
-				);
-			}
-		}
-	);
-
-	const unstashChangelistCmd = vscode.commands.registerCommand(
-		'git-cl.unstashChangelist',
-		async (...args: unknown[]) => {
-			const stashName = resolveStashName(args);
-			const name = stashName ?? await pickStashedChangelistForAction(scmProvider, 'unstash');
-			if (!name) {
-				return;
-			}
-
-			const success = await unstashSingleChangelist(scmProvider, name, gitRoot, false);
-			if (success) {
-				await scmProvider.refresh();
-				vscode.window.showInformationMessage(
-					`git-cl: Unstashed changelist "${name}".`
-				);
-			}
-		}
-	);
-
-	const unstashForceChangelistCmd = vscode.commands.registerCommand(
-		'git-cl.unstashChangelistForce',
-		async (...args: unknown[]) => {
-			const stashName = resolveStashName(args);
-			const name = stashName ?? await pickStashedChangelistForAction(scmProvider, 'force unstash');
-			if (!name) {
-				return;
-			}
-
-			const success = await unstashSingleChangelist(scmProvider, name, gitRoot, true);
-			if (success) {
-				await scmProvider.refresh();
-				vscode.window.showInformationMessage(
-					`git-cl: Unstashed changelist "${name}".`
 				);
 			}
 		}
@@ -852,7 +795,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 		}
 	);
 
-	context.subscriptions.push(statusCmd, addToChangelistCmd, removeFromChangelistCmd, openFileDiffCmd, deleteChangelistCmd, deleteAllChangelistsCmd, stageChangelistCmd, unstageChangelistCmd, commitChangelistCmd, diffChangelistCmd, checkoutChangelistCmd, stashChangelistCmd, stashAllChangelistsCmd, unstashChangelistCmd, unstashForceChangelistCmd, unstashAllChangelistsCmd, branchFromChangelistCmd);
+	context.subscriptions.push(statusCmd, addToChangelistCmd, removeFromChangelistCmd, openFileDiffCmd, deleteChangelistCmd, deleteAllChangelistsCmd, stageChangelistCmd, unstageChangelistCmd, commitChangelistCmd, diffChangelistCmd, checkoutChangelistCmd, stashAllChangelistsCmd, unstashAllChangelistsCmd, branchFromChangelistCmd);
 	outputChannel.appendLine('git-cl extension activated.');
 }
 
