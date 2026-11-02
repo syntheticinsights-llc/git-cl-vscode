@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
-import { getCurrentBranch, getGitStatus, gitBranchExists, gitCheckoutBranch, gitCheckoutExistingBranch } from '../gitUtils';
+import { getCurrentBranch, getGitStatus, gitBranchExists, gitCheckoutBranch, gitCheckoutExistingBranch } from '../core/gitUtils';
 import { ChangelistTreeDataProvider } from '../changelistTreeProvider';
 import { pickChangelistForAction, resolveChangelistName } from '../commandArgs';
-import { stashSingleChangelist, unstashSingleChangelist } from '../stashOperations';
+import { stashSingleChangelist, unstashSingleChangelist } from '../stashActions';
 
 export function registerBranchCommands(scmProvider: ChangelistTreeDataProvider, gitRoot: string): vscode.Disposable[] {
 	return [

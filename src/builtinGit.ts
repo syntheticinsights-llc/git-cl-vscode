@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { gitAdd, gitReset } from './gitUtils';
+import { gitAdd, gitReset } from './core/gitUtils';
 
 interface BuiltinGitRepository {
 	add(paths: string[]): Promise<void>;

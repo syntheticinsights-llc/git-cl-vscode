@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { getGitStatus } from '../gitUtils';
+import { getGitStatus } from '../core/gitUtils';
 import { ChangelistTreeDataProvider } from '../changelistTreeProvider';
 import { pickChangelist, resolveFilePathFromArg, resolveFilePaths, resolveFilePathsFromChangelists } from '../commandArgs';
 

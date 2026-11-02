@@ -1,10 +1,10 @@
 import * as vscode from 'vscode';
-import { getGitStatus } from '../gitUtils';
+import { getGitStatus } from '../core/gitUtils';
 import { ChangelistTreeDataProvider } from '../changelistTreeProvider';
 import { renderReviewPrompt } from '../reviewPrompt';
 import { editReviewTemplate, readReviewTemplate } from '../reviewTemplate';
 import { pickChangelistForAction, resolveChangelistName, resolveStashName } from '../commandArgs';
-import { unstashSingleChangelist } from '../stashOperations';
+import { unstashSingleChangelist } from '../stashActions';
 
 export function registerChangelistCommands(scmProvider: ChangelistTreeDataProvider, gitRoot: string): vscode.Disposable[] {
 	return [

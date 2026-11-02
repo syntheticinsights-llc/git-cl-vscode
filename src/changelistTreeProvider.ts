@@ -2,9 +2,9 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { execFile } from 'child_process';
-import { ChangelistStore } from './changelistStore';
-import { StashStore, StashMetadata } from './stashStore';
-import { getGitStatusSnapshot, getHeadCommit, GitStatusMap } from './gitUtils';
+import { ChangelistStore } from './core/changelistStore';
+import { StashStore, StashMetadata } from './core/stashStore';
+import { getGitStatusSnapshot, getHeadCommit, GitStatusMap } from './core/gitUtils';
 import { buildFileTree, collectFiles, dirname, FileTreeFolder, ViewMode } from './fileTree';
 
 const HEAD_SCHEME = 'git-cl-head';

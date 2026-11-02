@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { getGitRoot, getGitCommonDir } from './gitUtils';
+import { getGitRoot, getGitCommonDir } from './core/gitUtils';
 import { ChangelistTreeDataProvider } from './changelistTreeProvider';
 import { ViewMode } from './fileTree';
 import { showFormattedStatus } from './statusReport';

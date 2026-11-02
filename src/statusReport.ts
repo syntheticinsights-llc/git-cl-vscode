@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { getGitStatus } from './gitUtils';
+import { getGitStatus } from './core/gitUtils';
 import { ChangelistTreeDataProvider } from './changelistTreeProvider';
 
 // ANSI color codes for output channel formatting

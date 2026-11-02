@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { getGitStatus } from './gitUtils';
+import { getGitStatus } from './core/gitUtils';
 import { ChangelistTreeDataProvider, expandFolderNodes, nodeFilePaths, TreeNode } from './changelistTreeProvider';
-import { validateChangelistName } from './changelistStore';
+import { validateChangelistName } from './core/changelistStore';
 
 /**
  * Resolve a single file path from a command argument.

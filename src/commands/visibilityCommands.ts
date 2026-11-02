@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { ChangelistTreeDataProvider } from '../changelistTreeProvider';
 import { pickChangelistForAction, pickStashedChangelistForAction, resolveChangelistName, resolveStashName } from '../commandArgs';
-import { stashSingleChangelist, unstashSingleChangelist } from '../stashOperations';
+import { stashSingleChangelist, unstashSingleChangelist } from '../stashActions';
 
 export function registerVisibilityCommands(scmProvider: ChangelistTreeDataProvider, gitRoot: string): vscode.Disposable[] {
 	return [

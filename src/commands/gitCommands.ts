@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { getGitStatus, gitCheckout, gitCommit } from '../gitUtils';
+import { getGitStatus, gitCheckout, gitCommit } from '../core/gitUtils';
 import { ChangelistTreeDataProvider } from '../changelistTreeProvider';
 import { stageFiles, unstageFiles } from '../builtinGit';
 import { pickChangelistForAction, resolveChangelistName } from '../commandArgs';
