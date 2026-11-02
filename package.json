@@ -20,6 +20,9 @@
     "workspaceContains:.git"
   ],
   "main": "./dist/extension.js",
+  "bin": {
+    "git-cl-ts": "./dist/cli.js"
+  },
   "contributes": {
     "commands": [
       {
@@ -367,9 +370,11 @@
     }
   },
   "scripts": {
-    "build": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=es2020 --sourcemap",
-    "watch": "npm run build -- --watch",
-    "package": "npm run build -- --minify && vsce package $(semver -i prerelease $(node -p \"require('./package.json').version\"))",
+    "build": "npm run build:extension && npm run build:cli",
+    "build:extension": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=es2020 --sourcemap",
+    "build:cli": "esbuild ./src/cli/main.ts --bundle --outfile=dist/cli.js --format=cjs --platform=node --target=es2020 --banner:js=\"#!/usr/bin/env node\" && chmod +x dist/cli.js",
+    "watch": "npm run build:extension -- --watch",
+    "package": "npm run build:extension -- --minify && npm run build:cli && vsce package $(semver -i prerelease $(node -p \"require('./package.json').version\"))",
     "install-local": "bash scripts/install-local.sh",
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",

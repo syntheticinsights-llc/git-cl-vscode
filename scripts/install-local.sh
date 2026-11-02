@@ -4,13 +4,17 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 VSIX=git-cl-vscode.vsix
+CLI_LINK=/opt/homebrew/bin/git-cl-ts
 EDITOR_CLIS=(
 	code
 	cursor
 	"/Applications/Antigravity IDE.app/Contents/Resources/app/bin/antigravity-ide"
 )
 
-npm run build -- --minify
+npm run build:extension -- --minify
+npm run build:cli
+ln -sf "$PWD/dist/cli.js" "$CLI_LINK"
+echo "linked: $CLI_LINK -> $PWD/dist/cli.js"
 vsce package patch --no-git-tag-version --no-dependencies --out "$VSIX"
 
 installed=0
