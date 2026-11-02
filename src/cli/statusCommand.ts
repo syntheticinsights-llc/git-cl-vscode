@@ -1,8 +1,7 @@
 import { spawnSync } from 'child_process';
-import * as fs from 'fs';
 import * as path from 'path';
 import { ChangelistData, ChangelistStore } from '../core/changelistStore';
-import { StashStore } from '../core/stashStore';
+import { StashData, StashStore } from '../core/stashStore';
 import { CliCommand, CliExit, describeFailedCommand, OptionValues, print, Repository } from './command';
 import { CONFLICT_CODES, formatFileStatus, relativeToRoot, resolvePath, shouldUseColor } from './fileStatusFormat';
 
@@ -14,8 +13,6 @@ const COMMON_STATUS_CODES: ReadonlySet<string> = new Set([
 const PYTHON_LINE_BREAK = /\r\n|[\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]/;
 
 const ISO_TIMESTAMP = /^(\d{4})-?(\d{2})-?(\d{2})(?:.(\d{2})(?::?(\d{2})(?::?(\d{2})(?:[.,]\d+)?)?)?(?:Z|[+-]\d{2}(?::?\d{2}(?::?\d{2}(?:[.,]\d+)?)?)?)?)?$/;
-
-type StashData = Record<string, unknown>;
 
 interface StashedChangelist {
 	name: string;
@@ -90,18 +87,10 @@ function loadChangelists({ gitRoot, gitCommonDir }: Repository): Readonly<Change
 	return store.getAll();
 }
 
-function loadStashes({ gitRoot, gitCommonDir }: Repository): StashData {
-	const stashFile = new StashStore(gitRoot, gitCommonDir).getFilePath();
-	if (!fs.existsSync(stashFile)) {
-		return {};
-	}
-	try {
-		const parsed: unknown = JSON.parse(fs.readFileSync(stashFile, 'utf-8'));
-		return isRecord(parsed) ? parsed : {};
-	} catch (error) {
-		print(`Error reading stash metadata: ${(error as Error).message}`);
-		return {};
-	}
+function loadStashes({ gitRoot, gitCommonDir }: Repository): Readonly<StashData> {
+	const store = new StashStore(gitRoot, gitCommonDir);
+	store.load();
+	return store.getAll();
 }
 
 function readStatusMap(gitRoot: string, showAll: boolean, includeUntracked: boolean): Map<string, string> {
@@ -181,24 +170,18 @@ function showActiveChangelists(
 	return { shownAny, assignedFiles };
 }
 
-function showStashedChangelists(stashes: StashData): void {
+function showStashedChangelists(stashes: Readonly<StashData>): void {
 	print('Stashed Changelists:');
-	const stashed = Object.entries(stashes).map(([name, data]) => toStashedChangelist(name, data));
+	const stashed: StashedChangelist[] = Object.entries(stashes).map(([name, metadata]) => ({
+		name,
+		fileCount: metadata.files.length,
+		timestamp: metadata.timestamp,
+	}));
 	stashed.sort((a, b) => compareCodeUnits(b.timestamp, a.timestamp));
 	for (const { name, fileCount, timestamp } of stashed) {
 		const fileWord = fileCount === 1 ? 'file' : 'files';
 		print(`  ${name} (${fileCount} ${fileWord}, ${formatStashTime(timestamp)})`);
 	}
-}
-
-function toStashedChangelist(name: string, data: unknown): StashedChangelist {
-	const metadata = isRecord(data) ? data : {};
-	const files = metadata.files;
-	return {
-		name,
-		fileCount: Array.isArray(files) || typeof files === 'string' ? files.length : 0,
-		timestamp: typeof metadata.timestamp === 'string' ? metadata.timestamp : '',
-	};
 }
 
 function formatStashTime(timestamp: string): string {
@@ -221,8 +204,4 @@ function compareCodeUnits(a: string, b: string): number {
 		return 0;
 	}
 	return a < b ? -1 : 1;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
