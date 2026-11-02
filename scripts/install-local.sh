@@ -4,7 +4,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 VSIX=git-cl-vscode.vsix
-CLI_LINK=/opt/homebrew/bin/git-cl-ts
+CLI_INSTALL="$HOME/.local/share/git-cl/git-cl.js"
+CLI_LINK=/opt/homebrew/bin/git-cl
 EDITOR_CLIS=(
 	code
 	cursor
@@ -13,8 +14,10 @@ EDITOR_CLIS=(
 
 npm run build:extension -- --minify
 npm run build:cli
-ln -sf "$PWD/dist/cli.js" "$CLI_LINK"
-echo "linked: $CLI_LINK -> $PWD/dist/cli.js"
+mkdir -p "$(dirname "$CLI_INSTALL")"
+install -m 755 dist/cli.js "$CLI_INSTALL"
+ln -sf "$CLI_INSTALL" "$CLI_LINK"
+echo "installed: $CLI_LINK -> $CLI_INSTALL"
 vsce package patch --no-git-tag-version --no-dependencies --out "$VSIX"
 
 installed=0

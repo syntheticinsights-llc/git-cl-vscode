@@ -7,6 +7,7 @@ import { CliCommand, CliExit, describeFailedCommand, OptionValues, print, printE
 import { deleteCommand } from './deleteCommand';
 import { diffCommand } from './diffCommand';
 import { resolvePath } from './fileStatusFormat';
+import { guardEdit } from './guardEditCommand';
 import { removeCommand } from './removeCommand';
 import { statusCommand } from './statusCommand';
 
@@ -34,7 +35,8 @@ Commands:
   remove (r, rm)  Remove files from their changelist
   delete (del)    Delete changelists
   status (s, st)  Show file changes grouped by changelist
-  diff            Show git diff for one or more changelists`;
+  diff            Show git diff for one or more changelists
+  guard-edit      Claude Code PreToolUse hook: exit 2 when the edited file is hidden`;
 
 interface ParsedArgs {
 	flags: OptionValues;
@@ -52,6 +54,9 @@ async function main(args: string[]): Promise<number> {
 	if (commandName === undefined) {
 		print(MAIN_HELP);
 		return 0;
+	}
+	if (commandName === 'guard-edit') {
+		return guardEdit();
 	}
 	const command = COMMANDS.get(commandName);
 	if (!command) {

@@ -2,7 +2,7 @@
   "name": "git-cl-vscode",
   "displayName": "git-cl — Changelist Manager",
   "description": "Manage git changelists directly in VS Code. Organizes working changes into logical groups for focused commits.",
-  "version": "0.1.14",
+  "version": "0.1.16",
   "packageManager": "pnpm@12.9.1",
   "publisher": "waylit",
   "license": "MIT",
@@ -198,11 +198,6 @@
           "command": "git-cl.commitChangelist",
           "when": "view == git-cl.changelists && viewItem == changelist",
           "group": "inline@3"
-        },
-        {
-          "command": "git-cl.pruneChangelist",
-          "when": "view == git-cl.changelists && viewItem == changelist",
-          "group": "inline@7"
         },
         {
           "command": "git-cl.deleteChangelist",
