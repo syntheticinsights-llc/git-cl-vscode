@@ -221,6 +221,25 @@ export class ChangelistStore {
 		});
 	}
 
+	/**
+	 * Get the entries git reports no change for, grouped by changelist. An entry
+	 * is unchanged only when git status does not mention its path at all, so both
+	 * sides of a rename and a file added with `git add -N` stay.
+	 */
+	findUnchangedFiles(
+		gitStatus: ReadonlyMap<string, string>,
+		names?: readonly string[],
+	): Map<string, readonly string[]> {
+		const unchanged = new Map<string, readonly string[]>();
+		for (const name of names ?? this.getNames()) {
+			const staleFiles = this.getFiles(name).filter(file => !gitStatus.has(file));
+			if (staleFiles.length > 0) {
+				unchanged.set(name, staleFiles);
+			}
+		}
+		return unchanged;
+	}
+
 	/** Remove files from a specific changelist. */
 	removeFiles(name: string, files: string[]): void {
 		if (!this.data[name]) {

@@ -1,17 +1,10 @@
-import { spawnSync } from 'child_process';
 import * as path from 'path';
 import { ChangelistData, ChangelistStore } from '../core/changelistStore';
+import { getGitStatusSnapshot } from '../core/gitUtils';
 import { assertNotHidden } from '../core/hiddenChangelists';
 import { StashData, StashStore } from '../core/stashStore';
-import { CliCommand, CliExit, describeFailedCommand, OptionValues, print, printError, Repository } from './command';
+import { CliCommand, CliExit, OptionValues, print, printError, Repository } from './command';
 import { CONFLICT_CODES, formatFileStatus, relativeToRoot, resolvePath, shouldUseColor } from './fileStatusFormat';
-
-const COMMON_STATUS_CODES: ReadonlySet<string> = new Set([
-	'??', ' M', 'M ', 'MM', 'A ', 'AM', ' D', 'D ', 'R ', 'RM',
-	...CONFLICT_CODES,
-]);
-
-const PYTHON_LINE_BREAK = /\r\n|[\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]/;
 
 const ISO_TIMESTAMP = /^(\d{4})-?(\d{2})-?(\d{2})(?:.(\d{2})(?::?(\d{2})(?::?(\d{2})(?:[.,]\d+)?)?)?(?:Z|[+-]\d{2}(?::?\d{2}(?::?\d{2}(?:[.,]\d+)?)?)?)?)?$/;
 
@@ -36,21 +29,22 @@ options:
   -h, --help       show this help message and exit
   --include-no-cl  When filtering by changelist names, also show files not
                    assigned to any changelist
-  --all            Include files with uncommon Git status codes
+  --all            Ignored: every Git status code is shown anyway (kept so
+                   existing command lines keep working)
   --no-untracked   Hide untracked files (??) from output
   --no-color       Disable colored output`,
 	flags: ['include-no-cl', 'all', 'no-untracked', 'no-color'],
 	run: showStatus,
 };
 
-function showStatus(repository: Repository, flags: OptionValues, names: string[]): number {
+async function showStatus(repository: Repository, flags: OptionValues, names: string[]): Promise<number> {
 	const { gitRoot } = repository;
 	const selectedNames = names.length > 0 ? new Set(names) : undefined;
 	const changelists = loadChangelists(repository);
 	const stashStore = loadStashStore(repository);
 	assertNotHidden(names, stashStore);
 	const stashes = stashStore.getAll();
-	const statusMap = readStatusMap(gitRoot, flags.all === true, flags['no-untracked'] !== true);
+	const statusMap = await readStatusMap(gitRoot, flags['no-untracked'] !== true);
 	const useColor = shouldUseColor(flags['no-color'] === true);
 	const hasStashes = Object.keys(stashes).length > 0;
 
@@ -96,44 +90,25 @@ function loadStashStore({ gitRoot, gitCommonDir }: Repository): StashStore {
 	return store;
 }
 
-function readStatusMap(gitRoot: string, showAll: boolean, includeUntracked: boolean): Map<string, string> {
-	const command = ['git', 'status', '--porcelain', includeUntracked ? '--untracked-files=all' : '--untracked-files=no'];
-	const result = spawnSync(command[0], command.slice(1), {
-		encoding: 'utf-8',
-		stdio: ['inherit', 'pipe', 'inherit'],
-		maxBuffer: 1024 * 1024 * 1024,
-	});
-	if (result.status !== 0) {
-		printError(`Error getting git status: ${describeFailedCommand(command, result.status)}`);
+async function readStatusMap(gitRoot: string, includeUntracked: boolean): Promise<Map<string, string>> {
+	let status: ReadonlyMap<string, string>;
+	try {
+		({ status } = await getGitStatusSnapshot(gitRoot, { untrackedFiles: includeUntracked ? 'all' : 'no' }));
+	} catch (error) {
+		printError(`Error getting git status: ${error instanceof Error ? error.message : String(error)}`);
 		throw new CliExit(1);
 	}
 
 	const statusMap = new Map<string, string>();
-	let skippedCount = 0;
-	for (const line of result.stdout.split(PYTHON_LINE_BREAK)) {
-		if (line.length < 4) {
-			continue;
-		}
-		const code = line.slice(0, 2);
-		const filePath = statusEntryPath(code, line.slice(3).trim(), gitRoot);
-		if (showAll || COMMON_STATUS_CODES.has(code)) {
-			statusMap.set(filePath, code);
-		} else {
-			skippedCount++;
-		}
-	}
-
-	if (skippedCount > 0) {
-		print(`Note: ${skippedCount} file(s) with uncommon Git status codes were not shown. Use 'git cl st --all' to include them.`);
+	for (const [file, code] of status) {
+		statusMap.set(statusKey(file, gitRoot), code);
 	}
 	return statusMap;
 }
 
-function statusEntryPath(code: string, rawPath: string, gitRoot: string): string {
-	const targetPath = code.startsWith('R') && rawPath.includes('->')
-		? rawPath.split('->').pop()!.trim()
-		: rawPath;
-	return relativeToRoot(resolvePath(path.resolve(gitRoot, targetPath)), gitRoot) ?? targetPath;
+/** A changelist entry and git status name the same file only once both went through [resolvePath]. */
+function statusKey(file: string, gitRoot: string): string {
+	return relativeToRoot(resolvePath(path.resolve(gitRoot, file)), gitRoot) ?? file;
 }
 
 function showActiveChangelists(

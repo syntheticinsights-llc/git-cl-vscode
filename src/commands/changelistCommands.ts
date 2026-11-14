@@ -84,10 +84,6 @@ export function registerChangelistCommands(scmProvider: ChangelistTreeDataProvid
 	];
 }
 
-/**
- * Remove entries that no longer have working-tree or index changes (already
- * committed, or reverted to HEAD), keeping each changelist limited to pending work.
- */
 async function pruneChangelists(
 	scmProvider: ChangelistTreeDataProvider,
 	gitRoot: string,
@@ -102,11 +98,11 @@ async function pruneChangelists(
 	}
 
 	const prunedCount = await scmProvider.getChangelistStore().update(store => {
+		const unchanged = store.findUnchangedFiles(gitStatusMap, names);
 		let count = 0;
-		for (const name of names ?? store.getNames()) {
-			const staleFiles = store.getFiles(name).filter(file => !gitStatusMap.has(file));
-			store.removeFiles(name, staleFiles);
-			count += staleFiles.length;
+		for (const [name, files] of unchanged) {
+			store.removeFiles(name, [...files]);
+			count += files.length;
 		}
 		return count;
 	});

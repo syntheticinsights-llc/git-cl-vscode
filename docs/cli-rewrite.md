@@ -20,7 +20,7 @@ docs/cli-rewrite.md# git-cl 命令行 TS 重写
 
 ## 子命令范围
 
-只做 AI 和用户实际用到的 8 个，名字、别名和参数都和 Python 版一致：
+只做 AI 和用户实际用到的几个，名字、别名和参数都和 Python 版一致：
 
 | 子命令 | 别名 | 参数 |
 |---|---|---|
@@ -32,8 +32,11 @@ docs/cli-rewrite.md# git-cl 命令行 TS 重写
 | `commit` | `ci` | `(-m MESSAGE \| -F FILE) [--keep] CHANGELIST` |
 | `stash` | `sh` | `(--all \| CHANGELIST)` |
 | `unstash` | `us` | `[--force] (--all \| CHANGELIST)` |
+| `prune` | | `[--dry-run] [CHANGELIST...]` |
 
 不做 `checkout`、`stage`、`unstage`、`branch`，插件里已经有这些功能。将来真需要时再加。
+
+`prune` 是后加的，Python 版没有：插件早就有「Prune Unchanged Files」，但 AI 在终端里按不动按钮。规则只写一次，放在 `ChangelistStore.findUnchangedFiles`，插件命令和命令行都调它。
 
 开工前先和用户确认这个范围。
 
@@ -45,10 +48,10 @@ docs/cli-rewrite.md# git-cl 命令行 TS 重写
 - **放在哪个目录**：Python 版用 `git rev-parse --git-dir`，在 worktree 里会落到各自的 gitdir；插件用的是 common dir（`getGitCommonDir`）。两边不一致，统一成一种之前先问用户。
 
 ### 输出格式
-smartodo 的 `tools/scripts/git_cl_prune.dart` 按行解析 `git cl status --all --no-color` 的输出，AGENTS.md 里的工作流也依赖它。所以输出要和 Python 版逐字一致：
+输出是给人看的，AGENTS.md 的工作流也依赖它，所以格式和 Python 版保持一致（状态码那一行是例外，见下）：
 - 文件行：`  [XY] <相对当前目录的路径>`，两个空格开头，`XY` 是 porcelain 状态。不在 git 状态里的文件显示 `[  ]`；文件不存在时显示 `[XX]`，并打印一行提示。
 - 分组标题：`<list名>:`，未分组的文件放在 `No Changelist:` 下；已隐藏的 list 放在 `Stashed Changelists:` 区域，每行格式是 `  <名字> (<n> file, <YYYY-MM-DD HH:MM>)`。
-- 默认只显示常见状态码：`?? ' M' 'M ' MM 'A ' AM ' D' 'D ' 'R ' RM`，加上冲突码 `UU AA DD AU UA DU UD`。其他状态码会被跳过，并打印 `Note: N file(s) with uncommon Git status codes were not shown...`；加 `--all` 时全部显示。
+- 状态码全部原样显示：`XY` 就是 `git status --porcelain -z` 的两个字符，一次解析、插件和命令行共用 `parsePorcelainStatus`；改名的两条路径各占一行（新路径 `A`、原路径 `D`）。这一条与 Python 版不同，是有意为之：原来按白名单只显示常见码，漏掉了 ` A`（`git add -N` 的新文件）和 ` R`（未暂存 rename），文件显示成 `[  ]`，读起来像「没有变化」，smartodo 里那个按行解析这段输出的 prune 脚本就据此删掉过真实改动（剪枝现在是 `git cl prune`，判断只写在 core 里）。`--all` 保留成兼容用的空开关。
 - 颜色：`NO_COLOR` 环境变量、`--no-color` 或输出不是终端时都不上色。配色规则见 Python 版的 `clutil_format_file_status`。
 - 路径参数：相对于当前目录解析，再转成相对仓库根目录的路径。仓库外的路径，以及含 `; | & \` $` 或换行的路径，一律拒绝（见 `clutil_sanitize_path`）。
 

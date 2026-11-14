@@ -96,8 +96,13 @@ export function parsePorcelainStatus(output: string): GitStatusSnapshot {
 	return { status, renames };
 }
 
-export async function getGitStatusSnapshot(gitRoot: string): Promise<GitStatusSnapshot> {
-	return parsePorcelainStatus(await execGit(['status', '--porcelain', '-z'], gitRoot));
+export interface GitStatusOptions {
+	/** `all` lists the files inside an untracked directory one by one; `no` leaves untracked files out. */
+	untrackedFiles?: 'all' | 'no';
+}
+
+export async function getGitStatusSnapshot(gitRoot: string, { untrackedFiles = 'all' }: GitStatusOptions = {}): Promise<GitStatusSnapshot> {
+	return parsePorcelainStatus(await execGit(['status', '--porcelain', '-z', `--untracked-files=${untrackedFiles}`], gitRoot));
 }
 
 /**

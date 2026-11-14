@@ -3,6 +3,7 @@ import * as childProcess from 'child_process';
 import {
 	getGitRoot,
 	getGitStatus,
+	getGitStatusSnapshot,
 	parsePorcelainStatus,
 	gitAdd,
 	gitReset,
@@ -86,11 +87,13 @@ describe('getGitStatus', () => {
 			'D  staged-del.ts',
 			'?? untracked.ts',
 			' M d/中文 文件.txt',
+			' A intent-to-add.ts',
+			' M dir/a -> b.ts',
 		));
 		const status = await getGitStatus('/project');
 		expect(mockedExecFile).toHaveBeenCalledWith(
 			'git',
-			['status', '--porcelain', '-z'],
+			['status', '--porcelain', '-z', '--untracked-files=all'],
 			expect.anything(),
 			expect.any(Function)
 		);
@@ -103,7 +106,20 @@ describe('getGitStatus', () => {
 			'staged-del.ts': 'D ',
 			'untracked.ts': '??',
 			'd/中文 文件.txt': ' M',
+			'intent-to-add.ts': ' A',
+			'dir/a -> b.ts': ' M',
 		});
+	});
+
+	it('leaves untracked files out when asked', async () => {
+		mockExecSuccess(z(' M tracked.ts'));
+		await getGitStatusSnapshot('/project', { untrackedFiles: 'no' });
+		expect(mockedExecFile).toHaveBeenCalledWith(
+			'git',
+			['status', '--porcelain', '-z', '--untracked-files=no'],
+			expect.anything(),
+			expect.any(Function)
+		);
 	});
 
 	it('returns empty map for clean repo', async () => {

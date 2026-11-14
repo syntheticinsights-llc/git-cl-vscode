@@ -465,6 +465,43 @@ describe('ChangelistStore', () => {
 		});
 	});
 
+	describe('findUnchangedFiles', () => {
+		const changed: ReadonlyMap<string, string> = new Map([
+			['src/mod.ts', ' M'],
+			['src/added.ts', ' A'],
+			['src/renamed.ts', ' A'],
+			['src/original.ts', ' D'],
+		]);
+
+		it('returns only the entries git does not mention, grouped by changelist', () => {
+			store.addFiles('feat', ['src/mod.ts', 'src/original.ts', 'src/done.ts']);
+			store.addFiles('fix', ['src/also-done.ts']);
+
+			const unchanged = store.findUnchangedFiles(changed);
+
+			expect(Object.fromEntries(unchanged)).toEqual({ feat: ['src/done.ts'], fix: ['src/also-done.ts'] });
+		});
+
+		it('keeps both sides of a rename and an intent-to-add file', () => {
+			store.addFiles('feat', ['src/renamed.ts', 'src/original.ts', 'src/added.ts']);
+
+			expect(store.findUnchangedFiles(changed).size).toBe(0);
+		});
+
+		it('limits the result to the given names', () => {
+			store.addFiles('feat', ['src/done.ts']);
+			store.addFiles('fix', ['src/also-done.ts']);
+
+			expect([...store.findUnchangedFiles(changed, ['fix']).keys()]).toEqual(['fix']);
+		});
+
+		it('does not change the changelists', () => {
+			store.addFiles('feat', ['src/done.ts']);
+			store.findUnchangedFiles(changed);
+			expect(store.getFiles('feat')).toEqual(['src/done.ts']);
+		});
+	});
+
 	describe('createChangelist', () => {
 		it('creates an empty changelist', () => {
 			store.createChangelist('my-cl');

@@ -8,6 +8,7 @@ import { deleteCommand } from './deleteCommand';
 import { diffCommand } from './diffCommand';
 import { resolvePath } from './fileStatusFormat';
 import { guardEdit } from './guardEditCommand';
+import { pruneCommand } from './pruneCommand';
 import { removeCommand } from './removeCommand';
 import { statusCommand } from './statusCommand';
 
@@ -26,6 +27,7 @@ const COMMANDS: ReadonlyMap<string, CliCommand> = new Map([
 	['s', statusCommand],
 	['st', statusCommand],
 	['diff', diffCommand],
+	['prune', pruneCommand],
 ]);
 
 const MAIN_HELP = `usage: ${MAIN_USAGE}
@@ -36,6 +38,7 @@ Commands:
   delete (del)    Delete changelists
   status (s, st)  Show file changes grouped by changelist
   diff            Show git diff for one or more changelists
+  prune           Remove the files git reports no change for
   guard-edit      Claude Code PreToolUse hook: exit 2 when the edited file is hidden`;
 
 interface ParsedArgs {
