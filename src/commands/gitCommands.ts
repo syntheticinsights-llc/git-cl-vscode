@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
+import { commitChangelist } from '../changelistActions';
 import * as path from 'path';
-import { getGitStatus, gitCheckout, gitCommit } from '../core/gitUtils';
+import { getGitStatus, gitCheckout } from '../core/gitUtils';
 import { ChangelistTreeDataProvider } from '../changelistTreeProvider';
 import { stageFiles, unstageFiles } from '../builtinGit';
 import { pickChangelistForAction, resolveChangelistName } from '../commandArgs';
@@ -118,72 +119,11 @@ export function registerGitCommands(scmProvider: ChangelistTreeDataProvider, git
 				if (!name) {
 					return;
 				}
-
-				const store = scmProvider.getChangelistStore();
-				store.load();
-				const files = store.getFiles(name);
-				if (files.length === 0) {
-					vscode.window.showInformationMessage(`git-cl: Changelist "${name}" is empty.`);
-					return;
-				}
-
-				// Filter to tracked files only (skip untracked "??" files)
-				let gitStatusMap: Map<string, string>;
-				try {
-					gitStatusMap = await getGitStatus(gitRoot);
-				} catch {
-					vscode.window.showErrorMessage('git-cl: Failed to read git status.');
-					return;
-				}
-
-				const trackedFiles = files.filter(f => {
-					const status = gitStatusMap.get(f);
-					return status !== undefined && status !== '??';
-				});
-
-				if (trackedFiles.length === 0) {
-					vscode.window.showErrorMessage(
-						`git-cl: No tracked files to commit in changelist "${name}".`
-					);
-					return;
-				}
-
-				// Get commit message via input box
-				const input = await vscode.window.showInputBox({
-					prompt: `Commit message for changelist "${name}"`,
-					placeHolder: 'Enter commit message',
-					validateInput: value => {
-						if (!value || value.trim().length === 0) {
-							return 'Commit message cannot be empty';
-						}
-						return null;
-					},
-				});
-				if (!input) {
-					return;
-				}
-				const message = input.trim();
-
-				try {
-					await gitCommit(trackedFiles, message, gitRoot);
-				} catch (e: unknown) {
-					const msg = e instanceof Error ? e.message : String(e);
-					vscode.window.showErrorMessage(`git-cl: Commit failed: ${msg}`);
-					return;
-				}
-
-				// Delete the changelist after commit (default behavior)
-				try {
-					await store.update(s => s.deleteChangelist(name));
-				} catch (e: unknown) {
-					const saveMsg = e instanceof Error ? e.message : String(e);
-					vscode.window.showWarningMessage(`git-cl: Commit succeeded but failed to update changelist data: ${saveMsg}`);
-				}
-
-				await scmProvider.refresh();
-				vscode.window.showInformationMessage(
-					`git-cl: Committed ${trackedFiles.length} file(s) from "${name}".`
-				);
+				await commitChangelist({
+					gitRoot,
+					store: scmProvider.getChangelistStore(),
+					onChanged: () => scmProvider.refresh(),
+				}, name);
 			}
 		),
 		vscode.commands.registerCommand(
