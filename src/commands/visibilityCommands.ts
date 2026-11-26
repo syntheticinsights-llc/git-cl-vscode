@@ -3,23 +3,24 @@ import { ChangelistTreeDataProvider } from '../changelistTreeProvider';
 import { pickChangelistForAction, pickStashedChangelistForAction, resolveChangelistName, resolveStashName } from '../commandArgs';
 import { stashSingleChangelist, unstashSingleChangelist } from '../stashActions';
 
-export function registerVisibilityCommands(scmProvider: ChangelistTreeDataProvider, gitRoot: string): vscode.Disposable[] {
+export function registerVisibilityCommands(scmProvider: ChangelistTreeDataProvider): vscode.Disposable[] {
 	return [
 		vscode.commands.registerCommand('git-cl.hideChangelist', async (...args: unknown[]) => {
 			const name = resolveChangelistName(args) ?? await pickChangelistForAction(scmProvider, 'hide');
-			if (name && await stashSingleChangelist(scmProvider, name, gitRoot)) {
+			if (name && await stashSingleChangelist(scmProvider, name, scmProvider.getGitRoot())) {
 				await scmProvider.refresh();
 			}
 		}),
 		vscode.commands.registerCommand('git-cl.showChangelist', async (...args: unknown[]) => {
 			const name = resolveStashName(args) ?? await pickStashedChangelistForAction(scmProvider, 'show');
-			if (name && await unstashSingleChangelist(scmProvider, name, gitRoot, false)) {
+			if (name && await unstashSingleChangelist(scmProvider, name, scmProvider.getGitRoot(), false)) {
 				await scmProvider.refresh();
 			}
 		}),
 		vscode.commands.registerCommand(
 			'git-cl.stashAllChangelists',
 			async () => {
+				const gitRoot = scmProvider.getGitRoot();
 				const store = scmProvider.getChangelistStore();
 				store.load();
 				const names = [...store.getNames()];
@@ -48,6 +49,7 @@ export function registerVisibilityCommands(scmProvider: ChangelistTreeDataProvid
 		vscode.commands.registerCommand(
 			'git-cl.unstashAllChangelists',
 			async () => {
+				const gitRoot = scmProvider.getGitRoot();
 				const stashStore = scmProvider.getStashStore();
 				stashStore.load();
 				const names = [...stashStore.getNames()];

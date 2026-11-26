@@ -21,7 +21,15 @@ class HeadContentProvider implements vscode.TextDocumentContentProvider {
 	/** HEAD content per repository path; cleared whenever HEAD moves, which is the only way it can change. */
 	private readonly cache = new Map<string, string>();
 
-	constructor(private readonly gitRoot: string) {}
+	private defaultGitRoot: string;
+
+	constructor(gitRoot: string, private readonly outputChannel?: vscode.OutputChannel) {
+		this.defaultGitRoot = gitRoot;
+	}
+
+	setDefaultGitRoot(gitRoot: string): void {
+		this.defaultGitRoot = gitRoot;
+	}
 
 	/** VS Code caches provided content, so loaded HEAD documents must be told when HEAD moves. */
 	reloadOpenDocuments(): void {
@@ -37,18 +45,24 @@ class HeadContentProvider implements vscode.TextDocumentContentProvider {
 		if (token?.isCancellationRequested) {
 			return Promise.reject(new vscode.CancellationError());
 		}
+		const relativePath = uri.path.startsWith('/') ? uri.path.slice(1) : uri.path;
+		if (uri.fragment === 'empty') {
+			this.log(`head [empty] ${relativePath} (0ms)`);
+			return Promise.resolve('');
+		}
 		// The query carries the repository the diff belongs to; without it every
 		// repository would be served from this provider's own checkout.
-		const gitRoot = uri.query ? decodeURIComponent(uri.query) : this.gitRoot;
-		const relativePath = uri.path.startsWith('/') ? uri.path.slice(1) : uri.path;
+		const gitRoot = uri.query ? decodeURIComponent(uri.query) : this.defaultGitRoot;
 		const key = `${gitRoot}\u0000${relativePath}`;
 		const cached = this.cache.get(key);
 		if (cached !== undefined) {
+			this.log(`head [cache] ${relativePath} (${cached.length} chars, 0ms)`);
 			return Promise.resolve(cached);
 		}
 
 		// Clicking through files quickly replaces the diff editor before content arrives;
 		// VS Code cancels this request, so the git process is killed instead of queueing.
+		const startedAt = Date.now();
 		const abort = new AbortController();
 		const subscription = token?.onCancellationRequested(() => abort.abort());
 		return new Promise((resolve, reject) => {
@@ -58,22 +72,31 @@ class HeadContentProvider implements vscode.TextDocumentContentProvider {
 				{ cwd: gitRoot, maxBuffer: 10 * 1024 * 1024, timeout: 10_000, signal: abort.signal },
 				(error, stdout) => {
 					subscription?.dispose();
+					const elapsed = Date.now() - startedAt;
 					if (abort.signal.aborted || token?.isCancellationRequested) {
+						this.log(`head [cancelled] ${relativePath} (${elapsed}ms)`);
 						// Reject cancellations instead of returning '' so VS Code never
 						// caches an empty document for a file whose load was interrupted.
 						reject(new vscode.CancellationError());
 						return;
 					}
 					if (error) {
-						// Missing at HEAD (new file) or unreadable object.
+						// Missing at HEAD (new file) or unreadable object; cache '' until HEAD moves.
+						this.remember(key, '');
+						this.log(`head [missing] ${relativePath} (${elapsed}ms)`);
 						resolve('');
 						return;
 					}
 					this.remember(key, stdout);
+					this.log(`head [git-show] ${relativePath} (${stdout.length} chars, ${elapsed}ms)`);
 					resolve(stdout);
 				}
 			);
 		});
+	}
+
+	private log(message: string): void {
+		this.outputChannel?.appendLine(`[${new Date().toISOString()}] git-cl: ${message}`);
 	}
 
 	private remember(key: string, content: string): void {
@@ -174,12 +197,14 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 	private readonly _onDidChangeTreeData = new vscode.EventEmitter<TreeNode | undefined | void>();
 	readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
-	private readonly changelistStore: ChangelistStore;
-	private readonly stashStore: StashStore;
+	private changelistStore: ChangelistStore;
+	private stashStore: StashStore;
 	private readonly disposables: vscode.Disposable[] = [];
+	private repoWatchers: vscode.Disposable[] = [];
 
 	private refreshTimeout: ReturnType<typeof setTimeout> | undefined;
 	private lastWarnedMissingFiles = new Set<string>();
+	private refreshToken = 0;
 
 	// Cached data from last refresh
 	private cachedChangelists: Record<string, string[]> = {};
@@ -188,43 +213,54 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 	private cachedRenames = new Map<string, string>();
 	private cachedUnassigned: string[] = [];
 
-	private readonly gitCommonDir: string;
+	private gitRoot: string;
+	private gitCommonDir: string;
 	private readonly headContentProvider: HeadContentProvider;
 	private lastHeadCommit: string | null | undefined;
 
-	constructor(private readonly gitRoot: string, private readonly outputChannel?: vscode.OutputChannel, gitCommonDir?: string) {
+	constructor(gitRoot: string, private readonly outputChannel?: vscode.OutputChannel, gitCommonDir?: string) {
+		this.gitRoot = gitRoot;
 		this.gitCommonDir = gitCommonDir ?? path.join(gitRoot, '.git');
-		this.changelistStore = new ChangelistStore(gitRoot, this.gitCommonDir);
-		this.stashStore = new StashStore(gitRoot, this.gitCommonDir);
+		this.changelistStore = new ChangelistStore(this.gitRoot, this.gitCommonDir);
+		this.stashStore = new StashStore(this.gitRoot, this.gitCommonDir);
 
 		// Register HEAD content provider for diffs
-		this.headContentProvider = new HeadContentProvider(gitRoot);
+		this.headContentProvider = new HeadContentProvider(this.gitRoot, this.outputChannel);
 		this.disposables.push(
 			vscode.workspace.registerTextDocumentContentProvider(HEAD_SCHEME, this.headContentProvider)
 		);
 
-		this.setupWatchers();
+		this.setupGlobalListeners();
+		this.setupRepoWatchers();
 		this.refresh().catch(err => {
 			const msg = err instanceof Error ? err.message : String(err);
 			this.outputChannel?.appendLine(`git-cl: Initial refresh error: ${msg}`);
 		});
 	}
 
-	private setupWatchers(): void {
-		const gitDir = this.gitCommonDir;
-
-		// Watch cl.json, cl-stashes.json, git index, HEAD (branch switches) and logs/HEAD (every HEAD move)
-		const patterns = ['cl.json', 'cl-stashes.json', 'index', 'HEAD', 'logs/HEAD'];
-		for (const file of patterns) {
-			const watcher = vscode.workspace.createFileSystemWatcher(
-				new vscode.RelativePattern(vscode.Uri.file(gitDir), file)
-			);
-			watcher.onDidChange(() => this.debouncedRefresh());
-			watcher.onDidCreate(() => this.debouncedRefresh());
-			watcher.onDidDelete(() => this.debouncedRefresh());
-			this.disposables.push(watcher);
+	/** Switches the tree view to another repository and reloads its changelists and watchers. */
+	async setRepository(gitRoot: string, gitCommonDir?: string): Promise<void> {
+		const nextCommonDir = gitCommonDir ?? path.join(gitRoot, '.git');
+		if (this.gitRoot === gitRoot && this.gitCommonDir === nextCommonDir) {
+			return;
 		}
+		this.gitRoot = gitRoot;
+		this.gitCommonDir = nextCommonDir;
+		this.changelistStore = new ChangelistStore(this.gitRoot, this.gitCommonDir);
+		this.stashStore = new StashStore(this.gitRoot, this.gitCommonDir);
+		this.headContentProvider.setDefaultGitRoot(this.gitRoot);
+		this.lastHeadCommit = undefined;
+		this.lastWarnedMissingFiles = new Set();
+		this.cachedChangelists = {};
+		this.cachedStashData = {};
+		this.cachedGitStatus = new Map();
+		this.cachedRenames = new Map();
+		this.cachedUnassigned = [];
+		this.setupRepoWatchers();
+		await this.refresh();
+	}
 
+	private setupGlobalListeners(): void {
 		this.updateViewModeContext();
 		this.disposables.push(
 			vscode.workspace.onDidChangeConfiguration(e => {
@@ -239,6 +275,26 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 		this.disposables.push(
 			vscode.workspace.onDidSaveTextDocument(() => this.debouncedRefresh())
 		);
+	}
+
+	private setupRepoWatchers(): void {
+		for (const watcher of this.repoWatchers) {
+			watcher.dispose();
+		}
+		this.repoWatchers = [];
+		const gitDir = this.gitCommonDir;
+
+		// Watch cl.json, cl-stashes.json, git index, HEAD (branch switches) and logs/HEAD (every HEAD move)
+		const patterns = ['cl.json', 'cl-stashes.json', 'index', 'HEAD', 'logs/HEAD'];
+		for (const file of patterns) {
+			const watcher = vscode.workspace.createFileSystemWatcher(
+				new vscode.RelativePattern(vscode.Uri.file(gitDir), file)
+			);
+			watcher.onDidChange(() => this.debouncedRefresh());
+			watcher.onDidCreate(() => this.debouncedRefresh());
+			watcher.onDidDelete(() => this.debouncedRefresh());
+			this.repoWatchers.push(watcher);
+		}
 	}
 
 	private get viewMode(): ViewMode {
@@ -302,25 +358,34 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 	}
 
 	async refresh(): Promise<void> {
-		this.changelistStore.load();
-		this.stashStore.load();
+		const token = ++this.refreshToken;
+		const gitRoot = this.gitRoot;
+		const changelistStore = this.changelistStore;
+		const stashStore = this.stashStore;
+
+		changelistStore.load();
+		stashStore.load();
 
 		let gitStatus: GitStatusMap;
 		let renames = new Map<string, string>();
 		try {
-			({ status: gitStatus, renames } = await getGitStatusSnapshot(this.gitRoot));
+			({ status: gitStatus, renames } = await getGitStatusSnapshot(gitRoot));
 		} catch (err) {
 			const errMsg = err instanceof Error ? err.message : String(err);
 			this.outputChannel?.appendLine(`git-cl: Failed to read git status: ${errMsg}`);
 			gitStatus = new Map();
 		}
 
-		this.cachedChangelists = this.changelistStore.getAll();
-		this.cachedStashData = this.stashStore.getAll();
+		const headCommit = await getHeadCommit(gitRoot);
+		if (token !== this.refreshToken || gitRoot !== this.gitRoot) {
+			return;
+		}
+
+		this.cachedChangelists = changelistStore.getAll();
+		this.cachedStashData = stashStore.getAll();
 		this.cachedGitStatus = gitStatus;
 		this.cachedRenames = renames;
 
-		const headCommit = await getHeadCommit(this.gitRoot);
 		if (this.lastHeadCommit !== undefined && headCommit !== this.lastHeadCommit) {
 			this.headContentProvider.reloadOpenDocuments();
 		}
@@ -334,7 +399,7 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 			}
 		}
 
-		this.cachedUnassigned = unassignedFiles(gitStatus.keys(), assignedFiles, this.stashStore.getStashedFiles());
+		this.cachedUnassigned = unassignedFiles(gitStatus.keys(), assignedFiles, stashStore.getStashedFiles());
 
 		// Check for files in changelists that no longer exist on disk
 		const currentMissingFiles = new Set<string>();
@@ -377,6 +442,7 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 	}
 
 	getTreeItem(element: TreeNode): vscode.TreeItem {
+		const repoPrefix = `${this.gitRoot}:`;
 		switch (element.type) {
 			case 'changelist': {
 				const files = this.cachedChangelists[element.name] ?? [];
@@ -384,7 +450,7 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 					element.name,
 					vscode.TreeItemCollapsibleState.Expanded
 				);
-				item.id = `cl:${element.name}`;
+				item.id = `${repoPrefix}cl:${element.name}`;
 				item.contextValue = 'changelist';
 				item.iconPath = new vscode.ThemeIcon('list-unordered');
 				item.description = `${this.visibleFileCount({ type: 'changelist', name: element.name }, files)} file(s)`;
@@ -394,7 +460,7 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 			case 'changelistFile': {
 				const uri = vscode.Uri.file(path.join(this.gitRoot, element.filePath));
 				const item = new vscode.TreeItem(uri);
-				item.id = `cl:${element.changelistName}:${element.filePath}`;
+				item.id = `${repoPrefix}cl:${element.changelistName}:${element.filePath}`;
 				item.contextValue = 'changelistFile';
 				item.description = this.fileDescription(element.filePath, element.renamedFrom);
 				item.command = this.createFileCommand(element.filePath, uri, element.renamedFrom);
@@ -408,7 +474,7 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 					'Unassigned',
 					vscode.TreeItemCollapsibleState.Collapsed
 				);
-				item.id = 'unassigned';
+				item.id = `${repoPrefix}unassigned`;
 				item.contextValue = 'unassignedSection';
 				item.description = `${this.visibleFileCount({ type: 'unassigned' }, this.cachedUnassigned)} file(s)`;
 				return item;
@@ -417,7 +483,7 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 			case 'unassignedFile': {
 				const uri = vscode.Uri.file(path.join(this.gitRoot, element.filePath));
 				const item = new vscode.TreeItem(uri);
-				item.id = `unassigned:${element.filePath}`;
+				item.id = `${repoPrefix}unassigned:${element.filePath}`;
 				item.contextValue = 'unassignedFile';
 				item.description = this.fileDescription(element.filePath, element.renamedFrom);
 				item.command = this.createFileCommand(element.filePath, uri, element.renamedFrom);
@@ -431,7 +497,7 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 					element.name,
 					vscode.TreeItemCollapsibleState.Expanded
 				);
-				item.id = `stash:${element.name}`;
+				item.id = `${repoPrefix}stash:${element.name}`;
 				item.contextValue = 'stashedChangelist';
 				item.iconPath = new vscode.ThemeIcon('list-unordered');
 				item.description = `${element.metadata.files.length} file(s)`;
@@ -441,7 +507,7 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 			case 'stashedFile': {
 				const uri = vscode.Uri.file(path.join(this.gitRoot, element.filePath));
 				const item = new vscode.TreeItem(uri);
-				item.id = `stash:${element.stashName}:${element.filePath}`;
+				item.id = `${repoPrefix}stash:${element.stashName}:${element.filePath}`;
 				item.contextValue = 'stashedFile';
 				item.description = this.listModeDescription(element.filePath);
 				item.resourceUri = uri;
@@ -452,7 +518,7 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 				const uri = vscode.Uri.file(path.join(this.gitRoot, element.folder.path));
 				const item = new vscode.TreeItem(uri, vscode.TreeItemCollapsibleState.Expanded);
 				item.label = element.folder.label;
-				item.id = `${folderOwnerId(element.owner)}:folder:${element.folder.path}`;
+				item.id = `${repoPrefix}${folderOwnerId(element.owner)}:folder:${element.folder.path}`;
 				item.contextValue = folderContextValue(element.owner);
 				item.iconPath = vscode.ThemeIcon.Folder;
 				item.tooltip = element.folder.path;
@@ -590,7 +656,11 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 			title: 'Open Diff',
 			command: 'vscode.diff',
 			arguments: [
-				vscode.Uri.from({ scheme: HEAD_SCHEME, path: `/${renamedFrom ?? filePath}` }),
+				vscode.Uri.from({
+					scheme: HEAD_SCHEME,
+					path: `/${renamedFrom ?? filePath}`,
+					query: encodeURIComponent(this.gitRoot),
+				}),
 				uri,
 				renamedFrom
 					? `${path.basename(renamedFrom)} → ${path.basename(filePath)} (Working Tree)`
@@ -634,6 +704,9 @@ export class ChangelistTreeDataProvider implements vscode.TreeDataProvider<TreeN
 	dispose(): void {
 		if (this.refreshTimeout) {
 			clearTimeout(this.refreshTimeout);
+		}
+		for (const watcher of this.repoWatchers) {
+			watcher.dispose();
 		}
 		for (const d of this.disposables) {
 			d.dispose();

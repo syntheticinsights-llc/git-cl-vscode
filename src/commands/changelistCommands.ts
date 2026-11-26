@@ -6,20 +6,21 @@ import { editReviewTemplate, readReviewTemplate } from '../reviewTemplate';
 import { pickChangelistForAction, resolveChangelistName, resolveStashName } from '../commandArgs';
 import { unstashSingleChangelist } from '../stashActions';
 
-export function registerChangelistCommands(scmProvider: ChangelistTreeDataProvider, gitRoot: string): vscode.Disposable[] {
+export function registerChangelistCommands(scmProvider: ChangelistTreeDataProvider): vscode.Disposable[] {
 	return [
 		vscode.commands.registerCommand(
 			'git-cl.deleteChangelist',
 			async (...args: unknown[]) => {
 				const name = resolveChangelistName(args) ?? resolveStashName(args) ?? await pickChangelistForAction(scmProvider, 'disband');
 				if (name) {
-					await disbandChangelistWithConfirmation(scmProvider, gitRoot, name);
+					await disbandChangelistWithConfirmation(scmProvider, scmProvider.getGitRoot(), name);
 				}
 			}
 		),
 		vscode.commands.registerCommand(
 			'git-cl.deleteAllChangelists',
 			async () => {
+				const gitRoot = scmProvider.getGitRoot();
 				const store = scmProvider.getChangelistStore();
 				store.load();
 				const stashStore = scmProvider.getStashStore();
@@ -68,19 +69,19 @@ export function registerChangelistCommands(scmProvider: ChangelistTreeDataProvid
 		vscode.commands.registerCommand('git-cl.pruneChangelist', async (...args: unknown[]) => {
 			const name = resolveChangelistName(args) ?? await pickChangelistForAction(scmProvider, 'prune');
 			if (name) {
-				await pruneChangelists(scmProvider, gitRoot, [name]);
+				await pruneChangelists(scmProvider, scmProvider.getGitRoot(), [name]);
 			}
 		}),
 		vscode.commands.registerCommand('git-cl.pruneAllChangelists', async () => {
-			await pruneChangelists(scmProvider, gitRoot);
+			await pruneChangelists(scmProvider, scmProvider.getGitRoot());
 		}),
 		vscode.commands.registerCommand('git-cl.copyFromChangelist', async (...args: unknown[]) => {
 			const name = resolveChangelistName(args) ?? await pickChangelistForAction(scmProvider, 'copy from');
 			if (name) {
-				await pickAndCopyFromChangelist(scmProvider, gitRoot, name);
+				await pickAndCopyFromChangelist(scmProvider, scmProvider.getGitRoot(), name);
 			}
 		}),
-		vscode.commands.registerCommand('git-cl.editReviewTemplate', () => editReviewTemplate(gitRoot)),
+		vscode.commands.registerCommand('git-cl.editReviewTemplate', () => editReviewTemplate(scmProvider.getGitRoot())),
 	];
 }
 

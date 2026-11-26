@@ -6,11 +6,12 @@ import { ChangelistTreeDataProvider } from '../changelistTreeProvider';
 import { stageFiles, unstageFiles } from '../builtinGit';
 import { pickChangelistForAction, resolveChangelistName } from '../commandArgs';
 
-export function registerGitCommands(scmProvider: ChangelistTreeDataProvider, gitRoot: string): vscode.Disposable[] {
+export function registerGitCommands(scmProvider: ChangelistTreeDataProvider): vscode.Disposable[] {
 	return [
 		vscode.commands.registerCommand(
 			'git-cl.stageChangelist',
 			async (...args: unknown[]) => {
+				const gitRoot = scmProvider.getGitRoot();
 				const changelistName = resolveChangelistName(args);
 				const name = changelistName ?? await pickChangelistForAction(scmProvider, 'stage');
 				if (!name) {
@@ -60,6 +61,7 @@ export function registerGitCommands(scmProvider: ChangelistTreeDataProvider, git
 		vscode.commands.registerCommand(
 			'git-cl.unstageChangelist',
 			async (...args: unknown[]) => {
+				const gitRoot = scmProvider.getGitRoot();
 				const changelistName = resolveChangelistName(args);
 				const name = changelistName ?? await pickChangelistForAction(scmProvider, 'unstage');
 				if (!name) {
@@ -114,6 +116,7 @@ export function registerGitCommands(scmProvider: ChangelistTreeDataProvider, git
 		vscode.commands.registerCommand(
 			'git-cl.commitChangelist',
 			async (...args: unknown[]) => {
+				const gitRoot = scmProvider.getGitRoot();
 				const changelistName = resolveChangelistName(args);
 				const name = changelistName ?? await pickChangelistForAction(scmProvider, 'commit');
 				if (!name) {
@@ -129,6 +132,7 @@ export function registerGitCommands(scmProvider: ChangelistTreeDataProvider, git
 		vscode.commands.registerCommand(
 			'git-cl.diffChangelist',
 			async (...args: unknown[]) => {
+				const gitRoot = scmProvider.getGitRoot();
 				const changelistName = resolveChangelistName(args);
 				const name = changelistName ?? await pickChangelistForAction(scmProvider, 'diff');
 				if (!name) {
@@ -171,6 +175,7 @@ export function registerGitCommands(scmProvider: ChangelistTreeDataProvider, git
 						const headUri = vscode.Uri.from({
 							scheme: 'git-cl-head',
 							path: `/${filePath}`,
+							query: encodeURIComponent(gitRoot),
 						});
 						await vscode.commands.executeCommand('vscode.open', headUri, {
 							preview: false,
@@ -180,6 +185,7 @@ export function registerGitCommands(scmProvider: ChangelistTreeDataProvider, git
 						const headUri = vscode.Uri.from({
 							scheme: 'git-cl-head',
 							path: `/${filePath}`,
+							query: encodeURIComponent(gitRoot),
 						});
 						await vscode.commands.executeCommand('vscode.diff',
 							headUri,
@@ -203,6 +209,7 @@ export function registerGitCommands(scmProvider: ChangelistTreeDataProvider, git
 		vscode.commands.registerCommand(
 			'git-cl.checkoutChangelist',
 			async (...args: unknown[]) => {
+				const gitRoot = scmProvider.getGitRoot();
 				const changelistName = resolveChangelistName(args);
 				const name = changelistName ?? await pickChangelistForAction(scmProvider, 'revert');
 				if (!name) {

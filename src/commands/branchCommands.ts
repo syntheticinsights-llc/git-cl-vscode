@@ -4,11 +4,12 @@ import { ChangelistTreeDataProvider } from '../changelistTreeProvider';
 import { pickChangelistForAction, resolveChangelistName } from '../commandArgs';
 import { stashSingleChangelist, unstashSingleChangelist } from '../stashActions';
 
-export function registerBranchCommands(scmProvider: ChangelistTreeDataProvider, gitRoot: string): vscode.Disposable[] {
+export function registerBranchCommands(scmProvider: ChangelistTreeDataProvider): vscode.Disposable[] {
 	return [
 		vscode.commands.registerCommand(
 			'git-cl.branchFromChangelist',
 			async (...args: unknown[]) => {
+				const gitRoot = scmProvider.getGitRoot();
 				const changelistName = resolveChangelistName(args);
 				const name = changelistName ?? await pickChangelistForAction(scmProvider, 'branch from');
 				if (!name) {
