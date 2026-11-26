@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { renderReviewPrompt } from '../src/reviewPrompt';
+import { renderReviewPrompt } from '../src/core/reviewPrompt';
 
 describe('renderReviewPrompt', () => {
 	it('fills every changelist and files placeholder', () => {

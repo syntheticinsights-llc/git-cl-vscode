@@ -1,34 +1,22 @@
 import * as vscode from 'vscode';
-import { getGitRoot } from './core/gitUtils';
-import { ChangelistTreeDataProvider } from './changelistTreeProvider';
-import { BOARD_VIEW_TYPE, ChangelistBoard } from './board/changelistBoard';
-import { ViewMode } from './fileTree';
-import { showFormattedStatus } from './statusReport';
-import { TreeRepoSwitcher } from './treeRepoSwitcher';
-import { detectRepos, RepoRef } from './workspaceRepos';
-import { registerFileCommands } from './commands/fileCommands';
+import { showFormattedStatus } from './actions/statusReport';
+import { registerBranchCommands } from './commands/branchCommands';
 import { registerChangelistCommands } from './commands/changelistCommands';
+import { registerFileCommands } from './commands/fileCommands';
 import { registerGitCommands } from './commands/gitCommands';
 import { registerVisibilityCommands } from './commands/visibilityCommands';
-import { registerBranchCommands } from './commands/branchCommands';
+import { ViewMode } from './core/fileTree';
+import { getGitRoot } from './core/gitUtils';
+import { detectRepos, RepoRef } from './host/workspaceRepos';
+import { ChangelistFilesProvider } from './views/changelistFilesProvider';
+import { ChangelistListProvider } from './views/changelistListProvider';
+import { ChangelistWorkspace } from './views/changelistWorkspace';
+import { groupRefOf, sameGroupRef } from './views/treeNodes';
+import { TreeRepoSwitcher } from './views/treeRepoSwitcher';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
 	const outputChannel = vscode.window.createOutputChannel('git-cl');
 	context.subscriptions.push(outputChannel);
-
-	// Register the board serializer synchronously before any await so VS Code
-	// restoring a panel on reload always finds it immediately.
-	const board = new ChangelistBoard(context, outputChannel);
-	context.subscriptions.push(
-		board,
-		vscode.commands.registerCommand('git-cl.openBoard', () => board.show()),
-		vscode.window.registerWebviewPanelSerializer(BOARD_VIEW_TYPE, {
-			deserializeWebviewPanel(panel: vscode.WebviewPanel) {
-				board.restore(panel);
-				return Promise.resolve();
-			},
-		})
-	);
 
 	const repos = await detectRepos();
 	if (repos.length === 0) {
@@ -36,51 +24,90 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 		return;
 	}
 	const primary = await primaryRepo(repos);
-	board.setPreferredRepo(primary);
 
-	// Initialize TreeView provider (changelists section in Source Control sidebar)
 	const rememberedTreeRoot = context.globalState.get<string>('git-cl.tree.repo');
-	const initialTreeRepo = repos.find(repo => repo.root === rememberedTreeRoot) ?? primary;
+	const initialRepo = repos.find(repo => repo.root === rememberedTreeRoot) ?? primary;
 	vscode.commands.executeCommand('setContext', 'git-cl:hasGitRoot', true);
-	const scmProvider = new ChangelistTreeDataProvider(initialTreeRepo.root, outputChannel, initialTreeRepo.commonDir);
-	board.setHeadCacheInvalidator(() => scmProvider.reloadHeadDocuments());
-	const treeView = vscode.window.createTreeView('git-cl.changelists', {
-		treeDataProvider: scmProvider,
-		dragAndDropController: scmProvider,
+
+	const workspace = new ChangelistWorkspace(context, initialRepo.root, outputChannel, initialRepo.commonDir);
+	const listProvider = new ChangelistListProvider(workspace);
+	const filesProvider = new ChangelistFilesProvider(workspace);
+
+	const listTreeView = vscode.window.createTreeView('git-cl.changelists', {
+		treeDataProvider: listProvider,
+		dragAndDropController: listProvider,
+		canSelectMany: false,
+	});
+	const filesTreeView = vscode.window.createTreeView('git-cl.changelistFiles', {
+		treeDataProvider: filesProvider,
+		dragAndDropController: filesProvider,
 		showCollapseAll: true,
 		canSelectMany: true,
 	});
-	const repoSwitcher = new TreeRepoSwitcher(context, treeView, scmProvider, repos, initialTreeRepo);
-	context.subscriptions.push(
-		scmProvider,
-		treeView,
-		repoSwitcher,
-		vscode.commands.registerCommand('git-cl.switchRepository', () => repoSwitcher.pickRepository())
-	);
 
+	const syncListSelection = (): void => {
+		if (!listTreeView.visible) {
+			return;
+		}
+		const targetNode = workspace.getSelectedGroupNode();
+		if (!targetNode) {
+			return;
+		}
+		const currentSelected = listTreeView.selection[0];
+		if (currentSelected && sameGroupRef(groupRefOf(currentSelected), groupRefOf(targetNode))) {
+			return;
+		}
+		void Promise.resolve(listTreeView.reveal(targetNode, { select: true, focus: false })).catch(() => {
+			// Ignore races when a concurrent refresh replaces the node before reveal resolves.
+		});
+	};
+
+	const syncViews = (): void => {
+		filesProvider.syncViewChrome(filesTreeView);
+		syncListSelection();
+	};
+	syncViews();
+
+	const repoSwitcher = new TreeRepoSwitcher(context, listTreeView, workspace, repos, initialRepo);
 	const setViewMode = (mode: ViewMode) =>
 		vscode.workspace.getConfiguration('git-cl').update('viewMode', mode, vscode.ConfigurationTarget.Global);
+
 	context.subscriptions.push(
+		workspace,
+		listProvider,
+		filesProvider,
+		listTreeView,
+		filesTreeView,
+		repoSwitcher,
+		listTreeView.onDidChangeSelection(event => {
+			const selected = event.selection[0];
+			if (selected) {
+				workspace.selectGroup(groupRefOf(selected));
+			}
+		}),
+		listTreeView.onDidChangeVisibility(event => {
+			if (event.visible) {
+				syncListSelection();
+			}
+		}),
+		workspace.onDidChangeData(syncViews),
+		workspace.onDidChangeSelection(syncViews),
+		vscode.commands.registerCommand('git-cl.switchRepository', () => repoSwitcher.pickRepository()),
 		vscode.commands.registerCommand('git-cl.viewAsTree', () => setViewMode('tree')),
 		vscode.commands.registerCommand('git-cl.viewAsList', () => setViewMode('list')),
-	);
-
-	const statusCmd = vscode.commands.registerCommand('git-cl.showStatus', async () => {
-		await showFormattedStatus(outputChannel, scmProvider, scmProvider.getGitRoot());
-	});
-
-	context.subscriptions.push(
-		statusCmd,
-		...registerFileCommands(scmProvider, uri => repoSwitcher.ensureRepoForUri(uri)),
-		...registerChangelistCommands(scmProvider),
-		...registerGitCommands(scmProvider),
-		...registerVisibilityCommands(scmProvider),
-		...registerBranchCommands(scmProvider),
+		vscode.commands.registerCommand('git-cl.showStatus', () =>
+			showFormattedStatus(outputChannel, workspace, workspace.getGitRoot())
+		),
+		...registerFileCommands(workspace, uri => repoSwitcher.ensureRepoForUri(uri)),
+		...registerChangelistCommands(workspace),
+		...registerGitCommands(workspace),
+		...registerVisibilityCommands(workspace),
+		...registerBranchCommands(workspace),
 	);
 	outputChannel.appendLine(`git-cl extension activated (${repos.length} repositories).`);
 }
 
-/** The tree serves the first workspace folder's repository; that is the one it always served. */
+/** Prefers the repository that owns the first workspace folder. */
 async function primaryRepo(repos: RepoRef[]): Promise<RepoRef> {
 	const folder = vscode.workspace.workspaceFolders?.[0];
 	if (folder) {

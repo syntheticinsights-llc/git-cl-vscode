@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildFileTree, collectFiles, dirname, FileTreeFolder } from '../src/fileTree';
+import { buildFileTree, collectFiles, dirname, FileTreeFolder } from '../src/core/fileTree';
 
 function shape(folder: FileTreeFolder): unknown {
 	return {

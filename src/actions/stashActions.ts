@@ -1,11 +1,11 @@
 import * as vscode from 'vscode';
-import { ChangelistTreeDataProvider } from './changelistTreeProvider';
-import { EmptyChangelistError, findUnstashRisks, stashChangelist, StashWorkspace, unstashChangelist, UnstashRisks } from './core/stashOperations';
+import { EmptyChangelistError, findUnstashRisks, stashChangelist, StashWorkspace, unstashChangelist, UnstashRisks } from '../core/stashOperations';
+import { ChangelistWorkspace } from '../views/changelistWorkspace';
 
-function stashWorkspace(scmProvider: ChangelistTreeDataProvider, gitRoot: string): StashWorkspace {
+function stashWorkspace(workspace: ChangelistWorkspace, gitRoot: string): StashWorkspace {
 	return {
-		changelistStore: scmProvider.getChangelistStore(),
-		stashStore: scmProvider.getStashStore(),
+		changelistStore: workspace.getChangelistStore(),
+		stashStore: workspace.getStashStore(),
 		gitRoot,
 	};
 }
@@ -15,12 +15,12 @@ function stashWorkspace(scmProvider: ChangelistTreeDataProvider, gitRoot: string
  * Returns true on success.
  */
 export async function stashSingleChangelist(
-	scmProvider: ChangelistTreeDataProvider,
+	workspace: ChangelistWorkspace,
 	name: string,
 	gitRoot: string
 ): Promise<boolean> {
 	try {
-		await stashChangelist(stashWorkspace(scmProvider, gitRoot), name);
+		await stashChangelist(stashWorkspace(workspace, gitRoot), name);
 		return true;
 	} catch (e: unknown) {
 		if (e instanceof EmptyChangelistError) {
@@ -38,17 +38,17 @@ export async function stashSingleChangelist(
  * over conflicting working tree changes. Returns true on success.
  */
 export async function unstashSingleChangelist(
-	scmProvider: ChangelistTreeDataProvider,
+	workspace: ChangelistWorkspace,
 	name: string,
 	gitRoot: string,
 	force: boolean
 ): Promise<boolean> {
-	const workspace = stashWorkspace(scmProvider, gitRoot);
+	const stashTarget = stashWorkspace(workspace, gitRoot);
 	try {
-		if (!force && !await confirmUnstashRisks(name, await findUnstashRisks(workspace, name))) {
+		if (!force && !await confirmUnstashRisks(name, await findUnstashRisks(stashTarget, name))) {
 			return false;
 		}
-		await unstashChangelist(workspace, name);
+		await unstashChangelist(stashTarget, name);
 		return true;
 	} catch (e: unknown) {
 		vscode.window.showErrorMessage(`git-cl: ${e instanceof Error ? e.message : String(e)}`);

@@ -1,7 +1,6 @@
 /**
- * Rename handling shared by the Source Control tree and the board, so a rename
- * shows up the same way in both: as one file with its original name attached,
- * never as an add plus a delete.
+ * Groups git renames so a rename within one changelist appears as one file
+ * with its original name attached, never as an add plus a delete.
  */
 
 /** Renames whose both sides belong to the same group; a cross-group rename stays two entries. */

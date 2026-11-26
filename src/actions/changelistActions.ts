@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
-import { ChangelistStore } from './core/changelistStore';
-import { getGitStatus, gitCommit } from './core/gitUtils';
-import { stageFiles } from './builtinGit';
+import { ChangelistStore } from '../core/changelistStore';
+import { getGitStatus, gitCommit } from '../core/gitUtils';
+import { stageFiles } from '../host/builtinGit';
 
 /** One repository plus the changelist data that belongs to it. */
 export interface ChangelistTarget {
@@ -48,9 +48,8 @@ export async function stageChangelist(target: ChangelistTarget, name: string): P
 }
 
 /**
- * Commits the tracked files of one changelist and then disbands it. With no
- * message the user is asked for one; the board passes what was typed into the
- * board instead, so the message has a single place to be edited.
+ * Commits the tracked files of one changelist and then disbands it. Prompts
+ * the user for a commit message when none is provided.
  */
 export async function commitChangelist(
 	target: ChangelistTarget,

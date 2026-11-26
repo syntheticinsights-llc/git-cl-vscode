@@ -16,5 +16,5 @@
     "sourceMap": true
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", ".vscode-test", "src/webview"]
+  "exclude": ["node_modules", "dist", ".vscode-test"]
 }

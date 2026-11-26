@@ -1,12 +1,12 @@
 import * as vscode from 'vscode';
 import { getGitStatus } from '../core/gitUtils';
-import { ChangelistTreeDataProvider } from '../changelistTreeProvider';
-import { renderReviewPrompt } from '../reviewPrompt';
-import { editReviewTemplate, readReviewTemplate } from '../reviewTemplate';
-import { pickChangelistForAction, resolveChangelistName, resolveStashName } from '../commandArgs';
-import { unstashSingleChangelist } from '../stashActions';
+import { renderReviewPrompt } from '../core/reviewPrompt';
+import { editReviewTemplate, readReviewTemplate } from '../actions/reviewTemplate';
+import { unstashSingleChangelist } from '../actions/stashActions';
+import { ChangelistWorkspace } from '../views/changelistWorkspace';
+import { pickChangelistForAction, resolveChangelistName, resolveStashName } from './commandArgs';
 
-export function registerChangelistCommands(scmProvider: ChangelistTreeDataProvider): vscode.Disposable[] {
+export function registerChangelistCommands(scmProvider: ChangelistWorkspace): vscode.Disposable[] {
 	return [
 		vscode.commands.registerCommand(
 			'git-cl.deleteChangelist',
@@ -86,7 +86,7 @@ export function registerChangelistCommands(scmProvider: ChangelistTreeDataProvid
 }
 
 async function pruneChangelists(
-	scmProvider: ChangelistTreeDataProvider,
+	scmProvider: ChangelistWorkspace,
 	gitRoot: string,
 	names?: string[]
 ): Promise<void> {
@@ -119,7 +119,7 @@ async function pruneChangelists(
 
 /** Lets the user pick what to copy from a changelist: its name or a review prompt for it. */
 async function pickAndCopyFromChangelist(
-	scmProvider: ChangelistTreeDataProvider,
+	scmProvider: ChangelistWorkspace,
 	gitRoot: string,
 	name: string
 ): Promise<void> {
@@ -147,7 +147,7 @@ async function pickAndCopyFromChangelist(
  * Unassigned with their changes kept. Hidden changes are shown again first.
  */
 async function disbandChangelistWithConfirmation(
-	scmProvider: ChangelistTreeDataProvider,
+	scmProvider: ChangelistWorkspace,
 	gitRoot: string,
 	name: string
 ): Promise<void> {

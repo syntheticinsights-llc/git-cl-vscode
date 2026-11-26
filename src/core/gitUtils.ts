@@ -132,7 +132,7 @@ export async function getWorkingTreeLineStats(
 ): Promise<Map<string, { additions: number; deletions: number }>> {
 	const stats = new Map<string, { additions: number; deletions: number }>();
 	// --no-optional-locks prevents `git diff HEAD` from refreshing the index and
-	// re-triggering the `.git/index` watcher in ChangelistTreeDataProvider.
+	// re-triggering the `.git/index` watcher in ChangelistWorkspace.
 	const output = await execGit(['--no-optional-locks', 'diff', '--numstat', '-z', 'HEAD'], gitRoot);
 	const fields = output.split('\0');
 	for (let index = 0; index < fields.length; index++) {

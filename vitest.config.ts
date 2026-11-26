@@ -5,7 +5,7 @@ export default defineConfig({
 		include: ['test/**/*.test.ts'],
 		coverage: {
 			provider: 'v8',
-			include: ['src/changelistStore.ts', 'src/stashStore.ts', 'src/gitUtils.ts'],
+			include: ['src/core/changelistStore.ts', 'src/core/stashStore.ts', 'src/core/gitUtils.ts'],
 			reporter: ['text', 'text-summary'],
 			thresholds: {
 				statements: 80,

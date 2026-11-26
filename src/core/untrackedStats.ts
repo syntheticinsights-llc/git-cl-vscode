@@ -37,7 +37,7 @@ const READ_CONCURRENCY = 8;
 /**
  * Line counts for untracked files, which `git diff --numstat` cannot report
  * because HEAD has no version of them. Read from disk; binaries and oversized
- * files are skipped so the board shows no number rather than a wrong one.
+ * files are skipped so the view shows no number rather than a wrong one.
  */
 export async function getUntrackedLineStats(
 	gitRoot: string,

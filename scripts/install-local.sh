@@ -18,7 +18,6 @@ if [ -n "$latest_code_server" ]; then
 fi
 
 npm run build:extension -- --minify
-npm run build:webview -- --minify
 npm run build:cli
 mkdir -p "$(dirname "$CLI_INSTALL")"
 install -m 755 dist/cli.js "$CLI_INSTALL"

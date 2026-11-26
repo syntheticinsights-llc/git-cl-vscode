@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { getGitStatus } from './core/gitUtils';
-import { ChangelistTreeDataProvider } from './changelistTreeProvider';
+import { getGitStatus } from '../core/gitUtils';
+import { ChangelistWorkspace } from '../views/changelistWorkspace';
 
 // ANSI color codes for output channel formatting
 const RESET = '\x1b[0m';
@@ -57,12 +57,12 @@ function colorizeStatus(status: string): string {
  */
 export async function showFormattedStatus(
 	outputChannel: vscode.OutputChannel,
-	scmProvider: ChangelistTreeDataProvider,
+	workspace: ChangelistWorkspace,
 	gitRoot: string
 ): Promise<void> {
-	const store = scmProvider.getChangelistStore();
+	const store = workspace.getChangelistStore();
 	store.load();
-	const stashStore = scmProvider.getStashStore();
+	const stashStore = workspace.getStashStore();
 	stashStore.load();
 
 	let gitStatusMap: Map<string, string>;

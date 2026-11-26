@@ -1,6 +1,6 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { getGitStatus } from './core/gitUtils';
+import { getGitStatus } from '../core/gitUtils';
 
 /** How a file differs from HEAD, when the caller already knows. */
 export type WorkingTreeFileState = 'untracked' | 'added' | 'deleted' | 'changed';
@@ -13,17 +13,15 @@ export interface OpenWorkingTreeDiffOptions {
 	/** Keep focus where it is, so the diff can follow a file list being clicked through. */
 	preserveFocus?: boolean;
 	/**
-	 * Skips the `git status` this would otherwise run: the board already has the
-	 * state in its last snapshot, and a run per click is what makes clicking
-	 * through files feel slow.
+	 * Skips the `git status` this would otherwise run when the caller already
+	 * has the file's state cached from the last refresh.
 	 */
 	state?: WorkingTreeFileState;
 }
 
 /**
  * Shows what a file in a changelist looks like against HEAD: untracked files
- * as themselves, deleted files as their HEAD content, everything else as a
- * diff. Shared by the Source Control tree and the changelist board.
+ * as themselves, deleted files as their HEAD content, everything else as a diff.
  */
 export async function openWorkingTreeDiff(
 	gitRoot: string,

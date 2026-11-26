@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { DEFAULT_REVIEW_TEMPLATE } from './reviewPrompt';
+import { DEFAULT_REVIEW_TEMPLATE } from '../core/reviewPrompt';
 
 function templatePath(gitRoot: string): string {
 	const relative = vscode.workspace.getConfiguration('git-cl').get<string>('review.templateFile', '.vscode/git-cl-review-prompt.md');

@@ -1,6 +1,6 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { getGitCommonDir, getGitRoot } from './core/gitUtils';
+import { getGitCommonDir, getGitRoot } from '../core/gitUtils';
 
 export interface RepoRef {
 	root: string;
@@ -27,7 +27,7 @@ interface GitExtension {
 
 /**
  * Repositories VS Code itself sees. Asking the built-in Git extension keeps the
- * board's set identical to the Source Control view — same nested-repository scan,
+ * repository list identical to Source Control — same nested-repository scan,
  * same `git.autoRepositoryDetection` and `git.repositoryScanMaxDepth` settings —
  * instead of inventing a second scanning rule.
  */

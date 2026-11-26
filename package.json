@@ -2,7 +2,7 @@
   "name": "git-cl-vscode",
   "displayName": "git-cl — Changelist Manager",
   "description": "Manage git changelists directly in VS Code. Organizes working changes into logical groups for focused commits.",
-  "version": "0.1.34",
+  "version": "0.1.36",
   "packageManager": "pnpm@12.9.1",
   "publisher": "waylit",
   "license": "MIT",
@@ -17,8 +17,7 @@
     "Other"
   ],
   "activationEvents": [
-    "workspaceContains:.git",
-    "onWebviewPanel:git-cl.board"
+    "workspaceContains:.git"
   ],
   "main": "./dist/extension.js",
   "bin": {
@@ -31,12 +30,6 @@
         "title": "Switch Repository",
         "category": "git-cl",
         "icon": "$(repo)"
-      },
-      {
-        "command": "git-cl.openBoard",
-        "title": "Open Changelist Board",
-        "category": "git-cl",
-        "icon": "$(layout-sidebar-right)"
       },
       {
         "command": "git-cl.showStatus",
@@ -169,12 +162,27 @@
         "icon": "$(edit)"
       }
     ],
+    "viewsContainers": {
+      "panel": [
+        {
+          "id": "git-cl",
+          "title": "Changelists",
+          "icon": "resources/changelists.svg"
+        }
+      ]
+    },
     "views": {
-      "scm": [
+      "git-cl": [
         {
           "id": "git-cl.changelists",
           "name": "Changelists",
-          "icon": "$(list-tree)",
+          "icon": "$(list-unordered)",
+          "when": "git-cl:hasGitRoot"
+        },
+        {
+          "id": "git-cl.changelistFiles",
+          "name": "Files",
+          "icon": "$(files)",
           "when": "git-cl:hasGitRoot"
         }
       ]
@@ -279,32 +287,32 @@
         },
         {
           "command": "git-cl.openFileDiff",
-          "when": "view == git-cl.changelists && viewItem == changelistFile",
+          "when": "view == git-cl.changelistFiles && viewItem == changelistFile",
           "group": "inline@1"
         },
         {
           "command": "git-cl.removeFromChangelist",
-          "when": "view == git-cl.changelists && viewItem =~ /^changelist(File|Folder)$/",
+          "when": "view == git-cl.changelistFiles && viewItem =~ /^changelist(File|Folder)$/",
           "group": "inline@2"
         },
         {
           "command": "git-cl.removeFromChangelist",
-          "when": "view == git-cl.changelists && viewItem =~ /^changelist(File|Folder)$/",
+          "when": "view == git-cl.changelistFiles && viewItem =~ /^changelist(File|Folder)$/",
           "group": "1_modification"
         },
         {
           "command": "git-cl.openFileDiff",
-          "when": "view == git-cl.changelists && viewItem == changelistFile",
+          "when": "view == git-cl.changelistFiles && viewItem == changelistFile",
           "group": "2_diff"
         },
         {
           "command": "git-cl.addToChangelist",
-          "when": "view == git-cl.changelists && viewItem =~ /^unassigned(File|Folder)$/",
+          "when": "view == git-cl.changelistFiles && viewItem =~ /^unassigned(File|Folder)$/",
           "group": "inline@1"
         },
         {
           "command": "git-cl.addToChangelist",
-          "when": "view == git-cl.changelists && viewItem =~ /^unassigned(File|Folder)$/",
+          "when": "view == git-cl.changelistFiles && viewItem =~ /^unassigned(File|Folder)$/",
           "group": "1_modification"
         }
       ],
@@ -315,24 +323,9 @@
           "group": "navigation@0"
         },
         {
-          "command": "git-cl.openBoard",
-          "when": "view == git-cl.changelists",
-          "group": "navigation@1"
-        },
-        {
-          "command": "git-cl.viewAsTree",
-          "when": "view == git-cl.changelists && git-cl:viewMode == list",
-          "group": "navigation"
-        },
-        {
-          "command": "git-cl.viewAsList",
-          "when": "view == git-cl.changelists && git-cl:viewMode == tree",
-          "group": "navigation"
-        },
-        {
           "command": "git-cl.pruneAllChangelists",
           "when": "view == git-cl.changelists",
-          "group": "navigation"
+          "group": "navigation@1"
         },
         {
           "command": "git-cl.deleteAllChangelists",
@@ -353,6 +346,16 @@
           "command": "git-cl.editReviewTemplate",
           "when": "view == git-cl.changelists",
           "group": "overflow"
+        },
+        {
+          "command": "git-cl.viewAsTree",
+          "when": "view == git-cl.changelistFiles && git-cl:viewMode == list",
+          "group": "navigation@1"
+        },
+        {
+          "command": "git-cl.viewAsList",
+          "when": "view == git-cl.changelistFiles && git-cl:viewMode == tree",
+          "group": "navigation@1"
         }
       ],
       "scm/resourceState/context": [
@@ -388,30 +391,23 @@
     }
   },
   "scripts": {
-    "build": "npm run build:extension && npm run build:webview && npm run build:cli",
+    "build": "npm run build:extension && npm run build:cli",
     "build:extension": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=es2020 --sourcemap",
-    "build:webview": "esbuild ./src/webview/board.tsx --bundle --jsx=automatic --outfile=dist/webview/board.js --format=iife --platform=browser --target=es2020 --sourcemap",
     "build:cli": "esbuild ./src/cli/main.ts --bundle --outfile=dist/cli.js --format=cjs --platform=node --target=es2020 --banner:js=\"#!/usr/bin/env node\" && chmod +x dist/cli.js",
     "watch": "npm run build:extension -- --watch",
-    "watch:webview": "npm run build:webview -- --watch",
-    "package": "npm run build:extension -- --minify && npm run build:webview -- --minify && npm run build:cli && vsce package $(semver -i prerelease $(node -p \"require('./package.json').version\"))",
+    "package": "npm run build:extension -- --minify && npm run build:cli && vsce package $(semver -i prerelease $(node -p \"require('./package.json').version\"))",
     "install-local": "bash scripts/install-local.sh",
     "lint": "eslint src/",
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.webview.json --noEmit && tsc -p tsconfig.test.json",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage"
   },
   "devDependencies": {
     "@types/node": "^25.5.2",
-    "@types/react": "^19.3.2",
-    "@types/react-dom": "^19.3.0",
     "@types/vscode": "~1.107.0",
     "@vitest/coverage-v8": "^5.0.0",
     "@vscode/vsce": "^4.0.0",
     "esbuild": "^0.28.0",
-    "motion": "^14.14.0",
-    "react": "^19.3.1",
-    "react-dom": "^19.3.1",
     "semver": "^7.7.4",
     "typescript": "^7.0.0",
     "vitest": "^5.0.0"

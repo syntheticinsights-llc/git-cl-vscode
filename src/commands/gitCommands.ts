@@ -1,74 +1,41 @@
 import * as vscode from 'vscode';
-import { commitChangelist } from '../changelistActions';
 import * as path from 'path';
+import { commitChangelist, stageChangelist } from '../actions/changelistActions';
 import { getGitStatus, gitCheckout } from '../core/gitUtils';
-import { ChangelistTreeDataProvider } from '../changelistTreeProvider';
-import { stageFiles, unstageFiles } from '../builtinGit';
-import { pickChangelistForAction, resolveChangelistName } from '../commandArgs';
+import { unstageFiles } from '../host/builtinGit';
+import { ChangelistWorkspace } from '../views/changelistWorkspace';
+import { pickChangelistForAction, resolveChangelistName } from './commandArgs';
 
-export function registerGitCommands(scmProvider: ChangelistTreeDataProvider): vscode.Disposable[] {
+export function registerGitCommands(workspace: ChangelistWorkspace): vscode.Disposable[] {
 	return [
 		vscode.commands.registerCommand(
 			'git-cl.stageChangelist',
 			async (...args: unknown[]) => {
-				const gitRoot = scmProvider.getGitRoot();
-				const changelistName = resolveChangelistName(args);
-				const name = changelistName ?? await pickChangelistForAction(scmProvider, 'stage');
+				const gitRoot = workspace.getGitRoot();
+				const name = resolveChangelistName(args) ?? await pickChangelistForAction(workspace, 'stage');
 				if (!name) {
 					return;
 				}
 
-				const store = scmProvider.getChangelistStore();
+				const store = workspace.getChangelistStore();
 				store.load();
-				const files = store.getFiles(name);
-				if (files.length === 0) {
-					vscode.window.showInformationMessage(`git-cl: Changelist "${name}" is empty.`);
-					return;
-				}
-
-				// Filter to tracked files only (skip untracked "??" files)
-				let gitStatusMap: Map<string, string>;
-				try {
-					gitStatusMap = await getGitStatus(gitRoot);
-				} catch {
-					vscode.window.showErrorMessage('git-cl: Failed to read git status.');
-					return;
-				}
-
-				const trackedFiles = files.filter(f => {
-					const status = gitStatusMap.get(f);
-					return status !== undefined && status !== '??';
-				});
-
-				if (trackedFiles.length === 0) {
-					vscode.window.showInformationMessage(
-						`git-cl: No tracked files to stage in changelist "${name}".`
-					);
-					return;
-				}
-
-				try {
-					await stageFiles(trackedFiles, gitRoot);
-				} catch (e: unknown) {
-					const msg = e instanceof Error ? e.message : String(e);
-					vscode.window.showErrorMessage(`git-cl: Failed to stage files: ${msg}`);
-					return;
-				}
-
-				await scmProvider.refresh();
+				await stageChangelist({
+					gitRoot,
+					store,
+					onChanged: () => workspace.refresh(),
+				}, name);
 			}
 		),
 		vscode.commands.registerCommand(
 			'git-cl.unstageChangelist',
 			async (...args: unknown[]) => {
-				const gitRoot = scmProvider.getGitRoot();
-				const changelistName = resolveChangelistName(args);
-				const name = changelistName ?? await pickChangelistForAction(scmProvider, 'unstage');
+				const gitRoot = workspace.getGitRoot();
+				const name = resolveChangelistName(args) ?? await pickChangelistForAction(workspace, 'unstage');
 				if (!name) {
 					return;
 				}
 
-				const store = scmProvider.getChangelistStore();
+				const store = workspace.getChangelistStore();
 				store.load();
 				const files = store.getFiles(name);
 				if (files.length === 0) {
@@ -76,8 +43,6 @@ export function registerGitCommands(scmProvider: ChangelistTreeDataProvider): vs
 					return;
 				}
 
-				// Filter to files with staged changes only
-				// In git status --porcelain, first char is index status; non-space/non-? means staged
 				let gitStatusMap: Map<string, string>;
 				try {
 					gitStatusMap = await getGitStatus(gitRoot);
@@ -110,36 +75,39 @@ export function registerGitCommands(scmProvider: ChangelistTreeDataProvider): vs
 					return;
 				}
 
-				await scmProvider.refresh();
+				await workspace.refresh();
 			}
 		),
 		vscode.commands.registerCommand(
 			'git-cl.commitChangelist',
 			async (...args: unknown[]) => {
-				const gitRoot = scmProvider.getGitRoot();
-				const changelistName = resolveChangelistName(args);
-				const name = changelistName ?? await pickChangelistForAction(scmProvider, 'commit');
+				const gitRoot = workspace.getGitRoot();
+				const name = resolveChangelistName(args) ?? await pickChangelistForAction(workspace, 'commit');
 				if (!name) {
 					return;
 				}
+				const store = workspace.getChangelistStore();
+				store.load();
 				await commitChangelist({
 					gitRoot,
-					store: scmProvider.getChangelistStore(),
-					onChanged: () => scmProvider.refresh(),
+					store,
+					onChanged: async () => {
+						workspace.reloadHeadDocuments();
+						await workspace.refresh();
+					},
 				}, name);
 			}
 		),
 		vscode.commands.registerCommand(
 			'git-cl.diffChangelist',
 			async (...args: unknown[]) => {
-				const gitRoot = scmProvider.getGitRoot();
-				const changelistName = resolveChangelistName(args);
-				const name = changelistName ?? await pickChangelistForAction(scmProvider, 'diff');
+				const gitRoot = workspace.getGitRoot();
+				const name = resolveChangelistName(args) ?? await pickChangelistForAction(workspace, 'diff');
 				if (!name) {
 					return;
 				}
 
-				const store = scmProvider.getChangelistStore();
+				const store = workspace.getChangelistStore();
 				store.load();
 				const files = store.getFiles(name);
 				if (files.length === 0) {
@@ -147,7 +115,6 @@ export function registerGitCommands(scmProvider: ChangelistTreeDataProvider): vs
 					return;
 				}
 
-				// Get git status to determine how to diff each file
 				let gitStatusMap: Map<string, string>;
 				try {
 					gitStatusMap = await getGitStatus(gitRoot);
@@ -156,7 +123,6 @@ export function registerGitCommands(scmProvider: ChangelistTreeDataProvider): vs
 					return;
 				}
 
-				// Open diff tabs for each file
 				let opened = 0;
 				for (const filePath of files) {
 					const status = gitStatusMap.get(filePath);
@@ -166,12 +132,10 @@ export function registerGitCommands(scmProvider: ChangelistTreeDataProvider): vs
 						(status[1] === 'D' || (status[0] === 'D' && status[1] === ' '));
 
 					if (isUntracked) {
-						// Untracked files have no HEAD version — just open the file
 						await vscode.commands.executeCommand('vscode.open', fileUri, {
 							preview: false,
 						});
 					} else if (isDeleted) {
-						// Deleted files — show HEAD version (read-only)
 						const headUri = vscode.Uri.from({
 							scheme: 'git-cl-head',
 							path: `/${filePath}`,
@@ -181,7 +145,6 @@ export function registerGitCommands(scmProvider: ChangelistTreeDataProvider): vs
 							preview: false,
 						});
 					} else if (status) {
-						// Modified/staged files — show diff (HEAD vs working copy)
 						const headUri = vscode.Uri.from({
 							scheme: 'git-cl-head',
 							path: `/${filePath}`,
@@ -194,7 +157,6 @@ export function registerGitCommands(scmProvider: ChangelistTreeDataProvider): vs
 							{ preview: false }
 						);
 					}
-					// Skip files with no git status (clean files)
 
 					opened++;
 				}
@@ -209,14 +171,13 @@ export function registerGitCommands(scmProvider: ChangelistTreeDataProvider): vs
 		vscode.commands.registerCommand(
 			'git-cl.checkoutChangelist',
 			async (...args: unknown[]) => {
-				const gitRoot = scmProvider.getGitRoot();
-				const changelistName = resolveChangelistName(args);
-				const name = changelistName ?? await pickChangelistForAction(scmProvider, 'revert');
+				const gitRoot = workspace.getGitRoot();
+				const name = resolveChangelistName(args) ?? await pickChangelistForAction(workspace, 'revert');
 				if (!name) {
 					return;
 				}
 
-				const store = scmProvider.getChangelistStore();
+				const store = workspace.getChangelistStore();
 				store.load();
 				const files = store.getFiles(name);
 				if (files.length === 0) {
@@ -224,7 +185,6 @@ export function registerGitCommands(scmProvider: ChangelistTreeDataProvider): vs
 					return;
 				}
 
-				// Confirmation dialog — warns about data loss
 				const answer = await vscode.window.showWarningMessage(
 					`Revert ${files.length} file(s) in changelist "${name}" to HEAD? This will discard all uncommitted changes and cannot be undone.`,
 					{ modal: true },
@@ -244,7 +204,6 @@ export function registerGitCommands(scmProvider: ChangelistTreeDataProvider): vs
 					return;
 				}
 
-				// Delete the changelist if requested
 				if (answer === 'Revert & Delete Changelist') {
 					try {
 						await store.update(s => s.deleteChangelist(name));
@@ -254,7 +213,7 @@ export function registerGitCommands(scmProvider: ChangelistTreeDataProvider): vs
 					}
 				}
 
-				await scmProvider.refresh();
+				await workspace.refresh();
 				vscode.window.showInformationMessage(
 					`git-cl: Reverted ${files.length} file(s) in "${name}" to HEAD.`
 				);

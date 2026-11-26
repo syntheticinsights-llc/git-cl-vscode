@@ -1,8 +1,9 @@
 import * as vscode from 'vscode';
-import { ChangelistTreeDataProvider, TreeNode } from './changelistTreeProvider';
-import { ChangelistStore } from './core/changelistStore';
-import { getGitStatus } from './core/gitUtils';
-import { detectRepos, findRepoForPath, onDidChangeRepos, RepoRef } from './workspaceRepos';
+import { ChangelistStore } from '../core/changelistStore';
+import { getGitStatus } from '../core/gitUtils';
+import { detectRepos, findRepoForPath, onDidChangeRepos, RepoRef } from '../host/workspaceRepos';
+import { ChangelistWorkspace } from './changelistWorkspace';
+import { ChangelistGroupNode } from './treeNodes';
 
 const ACTIVE_TREE_REPO_KEY = 'git-cl.tree.repo';
 const HAS_MULTIPLE_REPOS_CONTEXT = 'git-cl:hasMultipleRepos';
@@ -13,12 +14,12 @@ interface RepoPickItem extends vscode.QuickPickItem {
 }
 
 /**
- * Coordinates repository switching for the Source Control TreeView.
+ * Coordinates repository switching for the Changelists views.
  *
- * Keeps a single Changelists view uncluttered: when only one repository exists
- * the UI stays unchanged; when multiple repositories are detected, the active
- * repo name appears in the view description and a title-bar button opens a
- * QuickPick listing each repo's changelist and change counts.
+ * Keeps the header uncluttered when only one repository exists; when multiple
+ * repositories are detected, the active repo name appears in the Changelists
+ * view description and a title-bar button opens a QuickPick listing each repo's
+ * changelist and change counts.
  */
 export class TreeRepoSwitcher implements vscode.Disposable {
 	private repos: RepoRef[];
@@ -29,8 +30,8 @@ export class TreeRepoSwitcher implements vscode.Disposable {
 
 	constructor(
 		private readonly context: vscode.ExtensionContext,
-		private readonly treeView: vscode.TreeView<TreeNode>,
-		private readonly scmProvider: ChangelistTreeDataProvider,
+		private readonly listTreeView: vscode.TreeView<ChangelistGroupNode>,
+		private readonly workspace: ChangelistWorkspace,
 		initialRepos: RepoRef[],
 		initialActive: RepoRef
 	) {
@@ -66,8 +67,8 @@ export class TreeRepoSwitcher implements vscode.Disposable {
 
 	/**
 	 * When a file command is invoked from built-in Source Control on a file inside
-	 * another repository, switch the tree provider to that repository first so the
-	 * file is added to its own `.git/cl.json`.
+	 * another repository, switch the views to that repository first so the file
+	 * is added to its own `.git/cl.json`.
 	 */
 	async ensureRepoForUri(uri: vscode.Uri): Promise<void> {
 		let owner = findRepoForPath(this.repos, uri.fsPath);
@@ -114,7 +115,6 @@ export class TreeRepoSwitcher implements vscode.Disposable {
 			await this.activate(nextRepo, false);
 			return;
 		}
-		// Keep label updated in case another repo with the same folder name appeared.
 		this.activeRepo = nextRepo;
 		this.syncUiChrome();
 	}
@@ -126,13 +126,13 @@ export class TreeRepoSwitcher implements vscode.Disposable {
 		}
 		this.activeRepo = repo;
 		this.syncUiChrome();
-		await this.scmProvider.setRepository(repo.root, repo.commonDir);
+		await this.workspace.setRepository(repo.root, repo.commonDir);
 	}
 
 	private syncUiChrome(): void {
 		const multiple = this.repos.length > 1;
 		void vscode.commands.executeCommand('setContext', HAS_MULTIPLE_REPOS_CONTEXT, multiple);
-		this.treeView.description = multiple ? this.activeRepo.label : undefined;
+		this.listTreeView.description = multiple ? this.activeRepo.label : undefined;
 	}
 
 	private async buildPickItem(repo: RepoRef): Promise<RepoPickItem> {

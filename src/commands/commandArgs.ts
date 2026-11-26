@@ -1,8 +1,9 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { getGitStatus } from './core/gitUtils';
-import { ChangelistTreeDataProvider, expandFolderNodes, nodeFilePaths, TreeNode } from './changelistTreeProvider';
-import { validateChangelistName } from './core/changelistStore';
+import { getGitStatus } from '../core/gitUtils';
+import { validateChangelistName } from '../core/changelistStore';
+import { ChangelistWorkspace } from '../views/changelistWorkspace';
+import { expandFolderNodes, nodeFilePaths, TreeNode } from '../views/treeNodes';
 
 /**
  * Resolve a single file path from a command argument.
@@ -115,7 +116,7 @@ export async function resolveFilePaths(
  */
 export async function resolveFilePathsFromChangelists(
 	gitRoot: string,
-	scmProvider: ChangelistTreeDataProvider,
+	scmProvider: ChangelistWorkspace,
 	args: unknown[]
 ): Promise<string[] | undefined> {
 	// Context menu with multi-select: second arg is the array of selected items
@@ -171,7 +172,7 @@ export async function resolveFilePathsFromChangelists(
  * Show a QuickPick to select an existing changelist or create a new one.
  */
 export async function pickChangelist(
-	scmProvider: ChangelistTreeDataProvider
+	scmProvider: ChangelistWorkspace
 ): Promise<string | undefined> {
 	const store = scmProvider.getChangelistStore();
 	store.load();
@@ -229,7 +230,7 @@ export function resolveChangelistName(
  * Show QuickPick to select a changelist for a given action (command palette flow).
  */
 export async function pickChangelistForAction(
-	scmProvider: ChangelistTreeDataProvider,
+	scmProvider: ChangelistWorkspace,
 	action: string
 ): Promise<string | undefined> {
 	const store = scmProvider.getChangelistStore();
@@ -274,7 +275,7 @@ export function resolveStashName(args: unknown[]): string | undefined {
  * Show QuickPick to select a stashed changelist for an action (command palette flow).
  */
 export async function pickStashedChangelistForAction(
-	scmProvider: ChangelistTreeDataProvider,
+	scmProvider: ChangelistWorkspace,
 	action: string
 ): Promise<string | undefined> {
 	const stashStore = scmProvider.getStashStore();

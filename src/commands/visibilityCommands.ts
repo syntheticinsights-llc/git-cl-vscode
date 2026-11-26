@@ -1,9 +1,9 @@
 import * as vscode from 'vscode';
-import { ChangelistTreeDataProvider } from '../changelistTreeProvider';
-import { pickChangelistForAction, pickStashedChangelistForAction, resolveChangelistName, resolveStashName } from '../commandArgs';
-import { stashSingleChangelist, unstashSingleChangelist } from '../stashActions';
+import { stashSingleChangelist, unstashSingleChangelist } from '../actions/stashActions';
+import { ChangelistWorkspace } from '../views/changelistWorkspace';
+import { pickChangelistForAction, pickStashedChangelistForAction, resolveChangelistName, resolveStashName } from './commandArgs';
 
-export function registerVisibilityCommands(scmProvider: ChangelistTreeDataProvider): vscode.Disposable[] {
+export function registerVisibilityCommands(scmProvider: ChangelistWorkspace): vscode.Disposable[] {
 	return [
 		vscode.commands.registerCommand('git-cl.hideChangelist', async (...args: unknown[]) => {
 			const name = resolveChangelistName(args) ?? await pickChangelistForAction(scmProvider, 'hide');

@@ -1,8 +1,4 @@
-/**
- * Files git reports as changed that no changelist and no hidden changelist
- * claims. Shared by the Source Control tree and the board so both agree on
- * what "Unassigned" means.
- */
+/** Files git reports as changed that no changelist and no hidden changelist claims. */
 export function unassignedFiles(
 	paths: Iterable<string>,
 	assigned: ReadonlySet<string>,
