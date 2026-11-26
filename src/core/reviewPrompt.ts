@@ -1,6 +1,6 @@
 export const DEFAULT_REVIEW_TEMPLATE = `Review the changes in changelist \`{{changelist}}\`.
 
-- List its files with \`git cl status {{changelist}} --all\` and read the changes with \`git cl diff {{changelist}} --both\`; read new untracked files separately.
+- List its files with \`git cl status {{changelist}} --all\` and read the changes with \`git cl diff {{changelist}} --both\`.
 - Files:
 {{files}}
 - Report only real bugs users will hit, each with concrete reproduction steps, file:line, consequence and a suggested fix.

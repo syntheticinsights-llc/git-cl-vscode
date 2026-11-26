@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { commitChangelist, stageChangelist } from '../actions/changelistActions';
-import { getGitStatus, gitCheckout } from '../core/gitUtils';
+import { getGitStatus, getHeadFiles, revertFilesToHead } from '../core/gitUtils';
 import { unstageFiles } from '../host/builtinGit';
 import { ChangelistWorkspace } from '../views/changelistWorkspace';
 import { pickChangelistForAction, resolveChangelistName } from './commandArgs';
@@ -57,7 +57,7 @@ export function registerGitCommands(workspace: ChangelistWorkspace): vscode.Disp
 						return false;
 					}
 					const indexStatus = status[0];
-					return indexStatus !== ' ' && indexStatus !== '?';
+					return (indexStatus !== ' ' && indexStatus !== '?') || status === ' A';
 				});
 
 				if (stagedFiles.length === 0) {
@@ -185,8 +185,26 @@ export function registerGitCommands(workspace: ChangelistWorkspace): vscode.Disp
 					return;
 				}
 
+				let gitStatusMap: Map<string, string>;
+				try {
+					gitStatusMap = await getGitStatus(gitRoot);
+				} catch {
+					vscode.window.showErrorMessage('git-cl: Failed to read git status.');
+					return;
+				}
+
+				const changedFiles = files.filter(f => gitStatusMap.has(f));
+				if (changedFiles.length === 0) {
+					vscode.window.showInformationMessage(`git-cl: No changed files to revert in changelist "${name}".`);
+					return;
+				}
+
+				const headFiles = await getHeadFiles(changedFiles, gitRoot);
+				const newFileCount = changedFiles.filter(f => !headFiles.has(f)).length;
+				const warningMessage = revertWarningMessage(name, changedFiles.length, newFileCount);
+
 				const answer = await vscode.window.showWarningMessage(
-					`Revert ${files.length} file(s) in changelist "${name}" to HEAD? This will discard all uncommitted changes and cannot be undone.`,
+					warningMessage,
 					{ modal: true },
 					'Revert',
 					'Revert & Delete Changelist'
@@ -197,7 +215,7 @@ export function registerGitCommands(workspace: ChangelistWorkspace): vscode.Disp
 				}
 
 				try {
-					await gitCheckout([...files], gitRoot);
+					await revertFilesToHead(changedFiles, gitRoot, headFiles);
 				} catch (e: unknown) {
 					const msg = e instanceof Error ? e.message : String(e);
 					vscode.window.showErrorMessage(`git-cl: Revert failed: ${msg}`);
@@ -215,9 +233,19 @@ export function registerGitCommands(workspace: ChangelistWorkspace): vscode.Disp
 
 				await workspace.refresh();
 				vscode.window.showInformationMessage(
-					`git-cl: Reverted ${files.length} file(s) in "${name}" to HEAD.`
+					`git-cl: Reverted ${changedFiles.length} file(s) in "${name}" to HEAD.`
 				);
 			}
 		),
 	];
+}
+
+function revertWarningMessage(name: string, totalCount: number, newFileCount: number): string {
+	if (newFileCount === totalCount) {
+		return `Delete ${newFileCount} new file(s) in changelist "${name}"? This cannot be undone.`;
+	}
+	if (newFileCount > 0) {
+		return `Revert ${totalCount} file(s) in changelist "${name}" to HEAD (${newFileCount} new file(s) will be deleted)? This will discard all uncommitted changes and cannot be undone.`;
+	}
+	return `Revert ${totalCount} file(s) in changelist "${name}" to HEAD? This will discard all uncommitted changes and cannot be undone.`;
 }

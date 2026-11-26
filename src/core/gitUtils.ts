@@ -1,4 +1,5 @@
 import { execFile } from 'child_process';
+import * as fs from 'fs';
 import * as path from 'path';
 
 /** Result of parsing git status --porcelain output */
@@ -196,6 +197,61 @@ export async function gitCheckout(files: string[], gitRoot: string): Promise<voi
 		return;
 	}
 	await execGit(['checkout', 'HEAD', '--', ...files], gitRoot);
+}
+
+/**
+ * Returns the subset of [files] that exist in HEAD. Returns an empty set when
+ * HEAD is unborn (no commits yet) or when [files] is empty.
+ */
+export async function getHeadFiles(files: readonly string[], gitRoot: string): Promise<Set<string>> {
+	if (files.length === 0) {
+		return new Set();
+	}
+	try {
+		const output = await execGit(['--no-optional-locks', 'ls-tree', '-r', '--name-only', '-z', 'HEAD', '--', ...files], gitRoot);
+		return new Set(output.split('\0').filter(Boolean));
+	} catch {
+		return new Set();
+	}
+}
+
+/**
+ * Removes paths from the git index without touching the working tree.
+ * Safe for untracked files and repositories with an unborn HEAD.
+ */
+export async function gitRemoveFromIndex(files: readonly string[], gitRoot: string): Promise<void> {
+	if (files.length === 0) {
+		return;
+	}
+	await execGit(['rm', '--cached', '-f', '--ignore-unmatch', '--', ...files], gitRoot);
+}
+
+/**
+ * Reverts every file in [files] back to HEAD: tracked HEAD entries are restored
+ * via `git checkout HEAD --`, while newly created files not in HEAD (untracked,
+ * staged additions, or intent-to-add entries) are removed from the index and
+ * deleted from disk.
+ */
+export async function revertFilesToHead(
+	files: readonly string[],
+	gitRoot: string,
+	headFiles?: ReadonlySet<string>
+): Promise<{ reverted: string[]; deleted: string[] }> {
+	if (files.length === 0) {
+		return { reverted: [], deleted: [] };
+	}
+	const knownInHead = headFiles ?? await getHeadFiles(files, gitRoot);
+	const inHead = files.filter(file => knownInHead.has(file));
+	const notInHead = files.filter(file => !knownInHead.has(file));
+
+	await gitCheckout(inHead, gitRoot);
+	if (notInHead.length > 0) {
+		await gitRemoveFromIndex(notInHead, gitRoot);
+		await Promise.all(
+			notInHead.map(file => fs.promises.rm(path.join(gitRoot, file), { force: true }))
+		);
+	}
+	return { reverted: inHead, deleted: notInHead };
 }
 
 /**

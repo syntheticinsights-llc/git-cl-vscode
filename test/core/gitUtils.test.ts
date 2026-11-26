@@ -8,6 +8,8 @@ import {
 	gitAdd,
 	gitReset,
 	gitCheckout,
+	getHeadFiles,
+	gitRemoveFromIndex,
 	gitCommit,
 	gitDiff,
 	gitStashPush,
@@ -224,6 +226,52 @@ describe('gitCheckout', () => {
 	it('rejects on git error', async () => {
 		mockExecError('error: pathspec did not match');
 		await expect(gitCheckout(['nonexistent.ts'], '/project')).rejects.toThrow('git checkout failed');
+	});
+});
+
+// ── getHeadFiles ────────────────────────────────────────────────────────────
+
+describe('getHeadFiles', () => {
+	it('returns the subset of paths present in HEAD', async () => {
+		mockExecSuccess('a.ts\0dir/b.ts\0');
+		const result = await getHeadFiles(['a.ts', 'dir/b.ts', 'new.ts'], '/project');
+		expect(result).toEqual(new Set(['a.ts', 'dir/b.ts']));
+		expect(mockedExecFile).toHaveBeenCalledWith(
+			'git',
+			['--no-optional-locks', 'ls-tree', '-r', '--name-only', '-z', 'HEAD', '--', 'a.ts', 'dir/b.ts', 'new.ts'],
+			expect.objectContaining({ cwd: '/project' }),
+			expect.any(Function)
+		);
+	});
+
+	it('returns empty set when HEAD is unborn', async () => {
+		mockExecError('fatal: Not a valid object name HEAD');
+		expect(await getHeadFiles(['a.ts'], '/project')).toEqual(new Set());
+	});
+
+	it('does nothing for empty file list', async () => {
+		expect(await getHeadFiles([], '/project')).toEqual(new Set());
+		expect(mockedExecFile).not.toHaveBeenCalled();
+	});
+});
+
+// ── gitRemoveFromIndex ──────────────────────────────────────────────────────
+
+describe('gitRemoveFromIndex', () => {
+	it('removes paths from the index without touching the working tree', async () => {
+		mockExecSuccess('');
+		await gitRemoveFromIndex(['new.ts', 'intent.ts'], '/project');
+		expect(mockedExecFile).toHaveBeenCalledWith(
+			'git',
+			['rm', '--cached', '-f', '--ignore-unmatch', '--', 'new.ts', 'intent.ts'],
+			expect.objectContaining({ cwd: '/project' }),
+			expect.any(Function)
+		);
+	});
+
+	it('does nothing for empty file list', async () => {
+		await gitRemoveFromIndex([], '/project');
+		expect(mockedExecFile).not.toHaveBeenCalled();
 	});
 });
 

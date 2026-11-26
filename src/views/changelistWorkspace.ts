@@ -222,7 +222,7 @@ export class ChangelistWorkspace implements vscode.Disposable {
 		if (status === '??' || !fs.existsSync(path.join(this.gitRoot, filePath))) {
 			return 'untracked';
 		}
-		const isAdded = status[0] === 'A' && !renamedFrom;
+		const isAdded = (status[0] === 'A' || status[1] === 'A') && !renamedFrom;
 		if (isAdded) {
 			// Newly added binary files have no line stats and cannot be text-diffed against empty HEAD.
 			return this.cachedLineStats.has(filePath) ? 'added' : 'untracked';

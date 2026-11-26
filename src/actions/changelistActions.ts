@@ -12,8 +12,7 @@ export interface ChangelistTarget {
 }
 
 /**
- * Stages a changelist's tracked files. Untracked files have no HEAD version and
- * are deliberately left out, matching what the Source Control tree does.
+ * Stages every changed file in a changelist, including untracked (`??`) files.
  */
 export async function stageChangelist(target: ChangelistTarget, name: string): Promise<boolean> {
 	const files = target.store.getFiles(name);
@@ -30,14 +29,14 @@ export async function stageChangelist(target: ChangelistTarget, name: string): P
 		return false;
 	}
 
-	const tracked = files.filter(file => status.get(file) !== undefined && status.get(file) !== '??');
-	if (tracked.length === 0) {
-		vscode.window.showInformationMessage(`git-cl: No tracked files to stage in changelist "${name}".`);
+	const changed = files.filter(file => status.get(file) !== undefined);
+	if (changed.length === 0) {
+		vscode.window.showInformationMessage(`git-cl: No changed files to stage in changelist "${name}".`);
 		return false;
 	}
 
 	try {
-		await stageFiles(tracked, target.gitRoot);
+		await stageFiles(changed, target.gitRoot);
 	} catch (error: unknown) {
 		vscode.window.showErrorMessage(`git-cl: Failed to stage files: ${messageOf(error)}`);
 		return false;
@@ -48,8 +47,8 @@ export async function stageChangelist(target: ChangelistTarget, name: string): P
 }
 
 /**
- * Commits the tracked files of one changelist and then disbands it. Prompts
- * the user for a commit message when none is provided.
+ * Commits every changed file in one changelist (including untracked files) and
+ * then disbands it. Prompts the user for a commit message when none is provided.
  */
 export async function commitChangelist(
 	target: ChangelistTarget,
@@ -70,9 +69,9 @@ export async function commitChangelist(
 		return false;
 	}
 
-	const tracked = files.filter(file => status.get(file) !== undefined && status.get(file) !== '??');
-	if (tracked.length === 0) {
-		vscode.window.showErrorMessage(`git-cl: No tracked files to commit in changelist "${name}".`);
+	const changed = files.filter(file => status.get(file) !== undefined);
+	if (changed.length === 0) {
+		vscode.window.showErrorMessage(`git-cl: No changed files to commit in changelist "${name}".`);
 		return false;
 	}
 
@@ -82,7 +81,7 @@ export async function commitChangelist(
 	}
 
 	try {
-		await gitCommit(tracked, commitMessage, target.gitRoot);
+		await gitCommit(changed, commitMessage, target.gitRoot);
 	} catch (error: unknown) {
 		vscode.window.showErrorMessage(`git-cl: Commit failed: ${messageOf(error)}`);
 		return false;
@@ -97,7 +96,7 @@ export async function commitChangelist(
 	}
 
 	await target.onChanged?.();
-	vscode.window.showInformationMessage(`git-cl: Committed ${tracked.length} file(s) from "${name}".`);
+	vscode.window.showInformationMessage(`git-cl: Committed ${changed.length} file(s) from "${name}".`);
 	return true;
 }
 

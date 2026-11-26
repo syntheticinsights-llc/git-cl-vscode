@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { getGitStatusSnapshot } from '../../src/core/gitUtils';
+import { getGitStatusSnapshot, getHeadFiles, gitCommit, revertFilesToHead } from '../../src/core/gitUtils';
 
 /**
  * Runs git for real. The codes these tests pin — an intent-to-add as " A", an
@@ -62,5 +62,40 @@ describe('getGitStatusSnapshot against git', () => {
 		const { status } = await getGitStatusSnapshot(repo);
 
 		expect(status.get('lib/a -> b.dart')).toBe('A ');
+	});
+
+	it('commits an untracked file directly without needing git add -N', async () => {
+		write('lib/untracked.dart', 'class U {}\n');
+
+		await gitCommit(['lib/untracked.dart'], 'add untracked', repo);
+
+		const { status } = await getGitStatusSnapshot(repo);
+		expect(status.size).toBe(0);
+		expect(await getHeadFiles(['lib/untracked.dart'], repo)).toEqual(new Set(['lib/untracked.dart']));
+	});
+
+	it('reverts HEAD files and removes untracked, staged-new, and intent-to-add files cleanly', async () => {
+		write('lib/a.dart', 'class AModified {}\n');
+		write('lib/untracked.dart', 'class U {}\n');
+		write('lib/staged.dart', 'class S {}\n');
+		git('add', 'lib/staged.dart');
+		write('lib/intent.dart', 'class I {}\n');
+		git('add', '-N', 'lib/intent.dart');
+		write('lib/intent-deleted.dart', 'class ID {}\n');
+		git('add', '-N', 'lib/intent-deleted.dart');
+		fs.rmSync(path.join(repo, 'lib/intent-deleted.dart'));
+
+		const result = await revertFilesToHead(
+			['lib/a.dart', 'lib/untracked.dart', 'lib/staged.dart', 'lib/intent.dart', 'lib/intent-deleted.dart'],
+			repo
+		);
+
+		expect(result.reverted).toEqual(['lib/a.dart']);
+		expect(result.deleted).toEqual(['lib/untracked.dart', 'lib/staged.dart', 'lib/intent.dart', 'lib/intent-deleted.dart']);
+		expect(fs.readFileSync(path.join(repo, 'lib/a.dart'), 'utf-8')).toBe('class A {}\n');
+		expect(fs.existsSync(path.join(repo, 'lib/untracked.dart'))).toBe(false);
+		expect(fs.existsSync(path.join(repo, 'lib/staged.dart'))).toBe(false);
+		expect(fs.existsSync(path.join(repo, 'lib/intent.dart'))).toBe(false);
+		expect((await getGitStatusSnapshot(repo)).status.size).toBe(0);
 	});
 });
