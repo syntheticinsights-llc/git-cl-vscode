@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { StashStore, type StashMetadata } from './stashStore';
+import { StashStore, type StashMetadata } from '../../src/core/stashStore';
 
 const failingWrite = vi.hoisted(() => ({ enabled: false }));
 

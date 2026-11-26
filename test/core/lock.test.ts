@@ -5,13 +5,13 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { promisify } from 'util';
-import { ChangelistStore } from './changelistStore';
-import { withLock } from './lock';
+import { ChangelistStore } from '../../src/core/changelistStore';
+import { withLock } from '../../src/core/lock';
 
 const execFileAsync = promisify(execFile);
 
 const WORKER_SOURCE = `
-import { ChangelistStore } from './changelistStore';
+import { ChangelistStore } from '../../src/core/changelistStore';
 
 async function main(): Promise<void> {
 	const [gitRoot, workerId, count] = process.argv.slice(2);

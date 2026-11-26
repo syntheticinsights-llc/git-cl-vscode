@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { ChangelistStore, validateChangelistName, sanitizeFilePath, resolveRepoPath } from './changelistStore';
-import { StashMetadata, StashStore } from './stashStore';
+import { ChangelistStore, validateChangelistName, sanitizeFilePath, resolveRepoPath } from '../../src/core/changelistStore';
+import { StashMetadata, StashStore } from '../../src/core/stashStore';
 
 const failingWrite = vi.hoisted(() => ({ enabled: false }));
 

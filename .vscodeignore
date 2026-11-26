@@ -1,12 +1,14 @@
 .vscode/**
 .vscode-test/**
 src/**
+test/**
 node_modules/**
 .gitignore
 .chief/**
 .claude/**
 .venv/**
 tsconfig.json
+tsconfig.*.json
 **/*.ts
 **/*.map
 scripts/**

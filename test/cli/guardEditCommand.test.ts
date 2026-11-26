@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { StashMetadata } from '../core/stashStore';
-import { findHiddenEdit } from './guardEditCommand';
+import { StashMetadata } from '../../src/core/stashStore';
+import { findHiddenEdit } from '../../src/cli/guardEditCommand';
 
 const root = '/repo';
 const stashedFiles = (files: string[]) => ({ files } as StashMetadata);

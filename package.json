@@ -2,7 +2,7 @@
   "name": "git-cl-vscode",
   "displayName": "git-cl — Changelist Manager",
   "description": "Manage git changelists directly in VS Code. Organizes working changes into logical groups for focused commits.",
-  "version": "0.1.17",
+  "version": "0.1.31",
   "packageManager": "pnpm@12.9.1",
   "publisher": "waylit",
   "license": "MIT",
@@ -17,7 +17,8 @@
     "Other"
   ],
   "activationEvents": [
-    "workspaceContains:.git"
+    "workspaceContains:.git",
+    "onWebviewPanel:git-cl.board"
   ],
   "main": "./dist/extension.js",
   "bin": {
@@ -25,6 +26,12 @@
   },
   "contributes": {
     "commands": [
+      {
+        "command": "git-cl.openBoard",
+        "title": "Open Changelist Board",
+        "category": "git-cl",
+        "icon": "$(layout-sidebar-right)"
+      },
       {
         "command": "git-cl.showStatus",
         "title": "Show Changelist Status",
@@ -297,6 +304,11 @@
       ],
       "view/title": [
         {
+          "command": "git-cl.openBoard",
+          "when": "view == git-cl.changelists",
+          "group": "navigation"
+        },
+        {
           "command": "git-cl.viewAsTree",
           "when": "view == git-cl.changelists && git-cl:viewMode == list",
           "group": "navigation"
@@ -365,23 +377,30 @@
     }
   },
   "scripts": {
-    "build": "npm run build:extension && npm run build:cli",
+    "build": "npm run build:extension && npm run build:webview && npm run build:cli",
     "build:extension": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=es2020 --sourcemap",
+    "build:webview": "esbuild ./src/webview/board.tsx --bundle --jsx=automatic --outfile=dist/webview/board.js --format=iife --platform=browser --target=es2020 --sourcemap",
     "build:cli": "esbuild ./src/cli/main.ts --bundle --outfile=dist/cli.js --format=cjs --platform=node --target=es2020 --banner:js=\"#!/usr/bin/env node\" && chmod +x dist/cli.js",
     "watch": "npm run build:extension -- --watch",
-    "package": "npm run build:extension -- --minify && npm run build:cli && vsce package $(semver -i prerelease $(node -p \"require('./package.json').version\"))",
+    "watch:webview": "npm run build:webview -- --watch",
+    "package": "npm run build:extension -- --minify && npm run build:webview -- --minify && npm run build:cli && vsce package $(semver -i prerelease $(node -p \"require('./package.json').version\"))",
     "install-local": "bash scripts/install-local.sh",
     "lint": "eslint src/",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.webview.json --noEmit && tsc -p tsconfig.test.json",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage"
   },
   "devDependencies": {
     "@types/node": "^25.5.2",
+    "@types/react": "^19.3.2",
+    "@types/react-dom": "^19.3.0",
     "@types/vscode": "~1.107.0",
     "@vitest/coverage-v8": "^5.0.0",
     "@vscode/vsce": "^4.0.0",
     "esbuild": "^0.28.0",
+    "motion": "^14.14.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "semver": "^7.7.4",
     "typescript": "^7.0.0",
     "vitest": "^5.0.0"

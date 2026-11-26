@@ -14,11 +14,12 @@ import {
 	gitStashDrop,
 	gitStashPop,
 	gitStashList,
+	getWorkingTreeLineStats,
 	getCurrentBranch,
 	gitCheckoutBranch,
 	gitBranchExists,
 	gitCheckoutExistingBranch,
-} from './gitUtils';
+} from '../../src/core/gitUtils';
 
 // Mock child_process.execFile
 vi.mock('child_process', () => ({
@@ -93,7 +94,7 @@ describe('getGitStatus', () => {
 		const status = await getGitStatus('/project');
 		expect(mockedExecFile).toHaveBeenCalledWith(
 			'git',
-			['status', '--porcelain', '-z', '--untracked-files=all'],
+			['--no-optional-locks', 'status', '--porcelain', '-z', '--untracked-files=all'],
 			expect.anything(),
 			expect.any(Function)
 		);
@@ -116,7 +117,7 @@ describe('getGitStatus', () => {
 		await getGitStatusSnapshot('/project', { untrackedFiles: 'no' });
 		expect(mockedExecFile).toHaveBeenCalledWith(
 			'git',
-			['status', '--porcelain', '-z', '--untracked-files=no'],
+			['--no-optional-locks', 'status', '--porcelain', '-z', '--untracked-files=no'],
 			expect.anything(),
 			expect.any(Function)
 		);
@@ -470,5 +471,32 @@ describe('gitCheckoutExistingBranch', () => {
 			expect.objectContaining({ cwd: '/project' }),
 			expect.any(Function)
 		);
+	});
+});
+
+describe('getWorkingTreeLineStats', () => {
+	it('parses counts keyed by path and skips binary rows', async () => {
+		mockExecSuccess('3\t1\tlib/a.dart\0-\t-\tassets/logo.png\0');
+		const stats = await getWorkingTreeLineStats('/project');
+		expect(Object.fromEntries(stats)).toEqual({ 'lib/a.dart': { additions: 3, deletions: 1 } });
+		expect(mockedExecFile).toHaveBeenCalledWith(
+			'git',
+			['--no-optional-locks', 'diff', '--numstat', '-z', 'HEAD'],
+			expect.anything(),
+			expect.any(Function)
+		);
+	});
+
+	it('registers only the new path of a rename', async () => {
+		mockExecSuccess('2\t0\t\0lib/old.dart\0lib/new.dart\0');
+		const stats = await getWorkingTreeLineStats('/project');
+		expect([...stats.keys()]).toEqual(['lib/new.dart']);
+		expect(stats.get('lib/new.dart')).toEqual({ additions: 2, deletions: 0 });
+	});
+
+	it('keeps paths that contain tabs', async () => {
+		mockExecSuccess('1\t0\tweird\tname.txt\0');
+		const stats = await getWorkingTreeLineStats('/project');
+		expect([...stats.keys()]).toEqual(['weird\tname.txt']);
 	});
 });

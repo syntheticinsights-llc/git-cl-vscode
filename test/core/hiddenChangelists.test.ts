@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { assertFilesNotHidden, assertNotHidden, findHiddenChangelists, HiddenChangelistError } from './hiddenChangelists';
-import { StashMetadata } from './stashStore';
+import { assertFilesNotHidden, assertNotHidden, findHiddenChangelists, HiddenChangelistError } from '../../src/core/hiddenChangelists';
+import { StashMetadata } from '../../src/core/stashStore';
 
 const stashes = { getNames: () => ['hidden-a', 'hidden-b'] };
 
