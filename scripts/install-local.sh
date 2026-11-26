@@ -11,8 +11,14 @@ EDITOR_CLIS=(
 	cursor
 	"/Applications/Antigravity IDE.app/Contents/Resources/app/bin/antigravity-ide"
 )
+# Also install into the latest VS Code Remote-SSH server on this host when present.
+latest_code_server=$(ls -td "$HOME"/.vscode-server/cli/servers/*/server/bin/code-server 2>/dev/null | head -n 1 || true)
+if [ -n "$latest_code_server" ]; then
+	EDITOR_CLIS+=("$latest_code_server")
+fi
 
 npm run build:extension -- --minify
+npm run build:webview -- --minify
 npm run build:cli
 mkdir -p "$(dirname "$CLI_INSTALL")"
 install -m 755 dist/cli.js "$CLI_INSTALL"
