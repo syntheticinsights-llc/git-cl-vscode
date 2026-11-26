@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 import { getGitStatus } from './core/gitUtils';
 
 /** How a file differs from HEAD, when the caller already knows. */
-export type WorkingTreeFileState = 'untracked' | 'deleted' | 'changed';
+export type WorkingTreeFileState = 'untracked' | 'added' | 'deleted' | 'changed';
 
 export interface OpenWorkingTreeDiffOptions {
 	/** Editor group to open into; omitted means "wherever VS Code puts it". */
@@ -44,6 +44,7 @@ export async function openWorkingTreeDiff(
 		scheme: 'git-cl-head',
 		path: `/${renamedFrom ?? filePath}`,
 		query: encodeURIComponent(gitRoot),
+		...(fileState === 'added' ? { fragment: 'empty' } : {}),
 	});
 	if (fileState === 'deleted') {
 		await vscode.commands.executeCommand('vscode.open', headUri, showOptions);
