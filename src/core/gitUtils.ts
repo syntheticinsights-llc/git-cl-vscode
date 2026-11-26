@@ -102,7 +102,12 @@ export interface GitStatusOptions {
 }
 
 export async function getGitStatusSnapshot(gitRoot: string, { untrackedFiles = 'all' }: GitStatusOptions = {}): Promise<GitStatusSnapshot> {
-	return parsePorcelainStatus(await execGit(['status', '--porcelain', '-z', `--untracked-files=${untrackedFiles}`], gitRoot));
+	// --no-optional-locks keeps `git status` from refreshing and rewriting the index.
+	// Without it every status write fires the index watcher, which schedules another
+	// status, and the extension ends up repainting itself in a loop.
+	return parsePorcelainStatus(
+		await execGit(['--no-optional-locks', 'status', '--porcelain', '-z', `--untracked-files=${untrackedFiles}`], gitRoot)
+	);
 }
 
 /**
@@ -112,6 +117,54 @@ export async function getGitStatusSnapshot(gitRoot: string, { untrackedFiles = '
  */
 export async function getGitStatus(gitRoot: string): Promise<GitStatusMap> {
 	return (await getGitStatusSnapshot(gitRoot)).status;
+}
+
+/**
+ * Line counts of the working tree against HEAD, keyed by repository-relative path.
+ *
+ * `-z` keeps paths containing tabs or newlines parseable, and running without a
+ * pathspec avoids the command-line length limit that a few hundred changed files
+ * reach on Windows. A rename arrives as `added\tremoved\t\0old\0new\0`; only the
+ * new path gets the counts, because the old one is what disappeared.
+ */
+export async function getWorkingTreeLineStats(
+	gitRoot: string
+): Promise<Map<string, { additions: number; deletions: number }>> {
+	const stats = new Map<string, { additions: number; deletions: number }>();
+	// --no-optional-locks prevents `git diff HEAD` from refreshing the index and
+	// re-triggering the `.git/index` watcher in ChangelistTreeDataProvider.
+	const output = await execGit(['--no-optional-locks', 'diff', '--numstat', '-z', 'HEAD'], gitRoot);
+	const fields = output.split('\0');
+	for (let index = 0; index < fields.length; index++) {
+		const field = fields[index];
+		if (!field) {
+			continue;
+		}
+		// Only the first two tabs separate fields; the path may itself contain tabs.
+		const firstTab = field.indexOf('\t');
+		const secondTab = field.indexOf('\t', firstTab + 1);
+		if (firstTab < 0 || secondTab < 0) {
+			continue;
+		}
+		const added = field.slice(0, firstTab);
+		const removed = field.slice(firstTab + 1, secondTab);
+		const path = field.slice(secondTab + 1);
+		if (added === '-' || removed === '-') {
+			continue;
+		}
+		const counts = { additions: Number(added), deletions: Number(removed) };
+		if (path) {
+			stats.set(path, counts);
+			continue;
+		}
+		// A rename or copy leaves the path empty and stores both paths as the next two fields.
+		index += 2;
+		const newPath = fields[index];
+		if (newPath) {
+			stats.set(newPath, counts);
+		}
+	}
+	return stats;
 }
 
 /**
