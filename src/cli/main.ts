@@ -10,6 +10,7 @@ import { resolvePath } from './fileStatusFormat';
 import { guardEdit } from './guardEditCommand';
 import { pruneCommand } from './pruneCommand';
 import { removeCommand } from './removeCommand';
+import { reviewPromptCommand } from './reviewPromptCommand';
 import { statusCommand } from './statusCommand';
 
 const PROG = 'git-cl';
@@ -28,6 +29,7 @@ const COMMANDS: ReadonlyMap<string, CliCommand> = new Map([
 	['st', statusCommand],
 	['diff', diffCommand],
 	['prune', pruneCommand],
+	['review-prompt', reviewPromptCommand],
 ]);
 
 const MAIN_HELP = `usage: ${MAIN_USAGE}
@@ -39,6 +41,7 @@ Commands:
   status (s, st)  Show file changes grouped by changelist
   diff            Show git diff for one or more changelists
   prune           Remove the files git reports no change for
+  review-prompt   Print the rendered review prompt for a changelist
   guard-edit      Claude Code PreToolUse hook: exit 2 when the edited file is hidden`;
 
 interface ParsedArgs {

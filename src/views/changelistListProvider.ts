@@ -28,6 +28,21 @@ export class ChangelistListProvider
 		this.subscription = workspace.onDidChangeData(() => this._onDidChangeTreeData.fire(undefined));
 	}
 
+	/** Keeps the view title badge in step with how many changelists the list holds. */
+	syncViewChrome(treeView: vscode.TreeView<ChangelistGroupNode>): void {
+		const changelists = this.workspace
+			.getGroupNodes()
+			.filter(node => node.type === 'changelist' || node.type === 'stashedChangelist').length;
+		if (changelists === 0) {
+			treeView.badge = undefined;
+			return;
+		}
+		treeView.badge = {
+			value: changelists,
+			tooltip: `${changelists} ${changelists === 1 ? 'changelist' : 'changelists'}`,
+		};
+	}
+
 	getParent(): undefined {
 		return undefined;
 	}
